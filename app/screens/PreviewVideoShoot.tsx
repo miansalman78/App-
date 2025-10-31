@@ -2076,12 +2076,6 @@ const PreviewVideoShoot = () => {
     }
   };
 
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   if (!videoUri) {
     return (
       <View style={styles.centered}>
@@ -2240,77 +2234,6 @@ const PreviewVideoShoot = () => {
               videoFrames={videoFrames}
               isLoading={isLoadingVideo}
             />
-            
-            {/* Editing Layers Section - CapCut Style */}
-            <View style={styles.editingLayersContainer}>
-              {/* Main Video Clip Layer */}
-              <TouchableOpacity style={styles.editingLayer}>
-                <MaterialIcons name="movie" size={20} color="#259B9A" />
-                <Text style={styles.layerText}>Main Clip</Text>
-                <Text style={styles.layerDuration}>{formatDuration(getFullDuration())}</Text>
-              </TouchableOpacity>
-
-              {/* Audio Layer */}
-              {selectedAudioTrack && (
-                <TouchableOpacity 
-                  style={styles.editingLayer}
-                  onPress={() => openVideoEditor('audio')}
-                >
-                  <MaterialIcons name="music-note" size={20} color="#FF9800" />
-                  <Text style={styles.layerText}>{selectedAudioTrack.name || 'Background Music'}</Text>
-                  <TouchableOpacity 
-                    onPress={() => {
-                      setSelectedAudioTrack(null);
-                      audioPlayerRef.current?.unloadAsync();
-                    }}
-                    style={styles.layerRemove}
-                  >
-                    <MaterialIcons name="close" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              )}
-
-              {/* Text Overlays Layer */}
-              {textOverlays.length > 0 && (
-                <TouchableOpacity 
-                  style={styles.editingLayer}
-                  onPress={() => openVideoEditor('text')}
-                >
-                  <MaterialIcons name="text-fields" size={20} color="#2196F3" />
-                  <Text style={styles.layerText}>Text ({textOverlays.length})</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Stickers Layer */}
-              {stickerOverlays.length > 0 && (
-                <TouchableOpacity 
-                  style={styles.editingLayer}
-                  onPress={() => openVideoEditor('stickers')}
-                >
-                  <MaterialIcons name="insert-emoticon" size={20} color="#9C27B0" />
-                  <Text style={styles.layerText}>Stickers ({stickerOverlays.length})</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Add Buttons */}
-              {!selectedAudioTrack && (
-                <TouchableOpacity 
-                  style={styles.addLayerButton}
-                  onPress={() => openVideoEditor('audio')}
-                >
-                  <MaterialIcons name="add" size={18} color="#259B9A" />
-                  <Text style={styles.addLayerText}>Add Audio</Text>
-                </TouchableOpacity>
-              )}
-              
-              <TouchableOpacity 
-                style={styles.addLayerButton}
-                onPress={() => openVideoEditor('text')}
-              >
-                <MaterialIcons name="add" size={18} color="#259B9A" />
-                <Text style={styles.addLayerText}>Add Text</Text>
-              </TouchableOpacity>
-            </View>
             
             {/* Bottom Toolbar - CapCut Style */}
             <BottomToolbar 
@@ -2757,14 +2680,14 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     alignItems: "center",
-    marginTop: moderateScale(10),
-    marginBottom: moderateScale(15),
-    paddingHorizontal: 0,
-    position: 'relative',
+    marginTop: moderateScale(20),
+    marginBottom: moderateScale(30),
+    paddingHorizontal: moderateScale(10),
   },
   video: {
-    width: SCREEN_WIDTH,
-    height: moderateScale(500),
+    width: SCREEN_WIDTH * 0.9 + 9,
+    height: moderateScale(440),
+    borderRadius: moderateScale(10),
     backgroundColor: "black",
   },
   playPauseOverlay: {
@@ -3141,60 +3064,6 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: moderateScale(4),
-  },
-  // CapCut-Style Editing Layers
-  editingLayersContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingVertical: moderateScale(12),
-    paddingHorizontal: moderateScale(16),
-    marginTop: moderateScale(8),
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  editingLayer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: moderateScale(12),
-    paddingVertical: moderateScale(10),
-    borderRadius: moderateScale(8),
-    marginBottom: moderateScale(8),
-    borderLeftWidth: 3,
-    borderLeftColor: '#259B9A',
-  },
-  layerText: {
-    color: '#fff',
-    fontSize: moderateScale(14),
-    fontWeight: '500',
-    marginLeft: moderateScale(10),
-    flex: 1,
-  },
-  layerDuration: {
-    color: '#999',
-    fontSize: moderateScale(12),
-    marginLeft: moderateScale(8),
-  },
-  layerRemove: {
-    padding: moderateScale(4),
-    marginLeft: moderateScale(8),
-  },
-  addLayerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(37, 155, 154, 0.15)',
-    paddingHorizontal: moderateScale(12),
-    paddingVertical: moderateScale(10),
-    borderRadius: moderateScale(8),
-    marginBottom: moderateScale(8),
-    borderWidth: 1,
-    borderColor: 'rgba(37, 155, 154, 0.3)',
-    borderStyle: 'dashed',
-  },
-  addLayerText: {
-    color: '#259B9A',
-    fontSize: moderateScale(13),
-    fontWeight: '500',
-    marginLeft: moderateScale(8),
   },
  
 });
