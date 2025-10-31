@@ -15,7 +15,7 @@ import StickerTimeline from '@/components/StickerTimeline';
 
 interface StickerOverlayProps {
   onAddSticker: (sticker: string, size: number, timestamp?: number) => void;
-  onAddImage: (imageUri: string, width: number, height: number, timestamp?: number) => void;
+  onAddImage?: (imageUri: string, width: number, height: number, timestamp?: number) => void;
   currentTime?: number; // Current video time in seconds
   videoDuration?: number; // Total video duration in seconds
   onTimeChange?: (time: number) => void; // Callback when timeline time changes
@@ -112,7 +112,7 @@ const StickerOverlay: React.FC<StickerOverlayProps> = ({
         const scaledWidth = width * scale;
         const scaledHeight = height * scale;
         
-        onAddImage(imageUri, scaledWidth, scaledHeight, currentTime);
+        onAddImage?.(imageUri, scaledWidth, scaledHeight, currentTime);
       }
     } catch (error) {
       console.error('Error picking image:', error);

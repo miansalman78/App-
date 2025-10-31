@@ -512,21 +512,20 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     paddingHorizontal: 0, // No padding between frames
+    marginHorizontal: 0, // No margin between frames
   },
   frameThumbnail: {
     width: '100%',
     height: '100%',
-    borderRadius: moderateScale(4),
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 0, // No rounded corners for seamless look
+    borderWidth: 0, // No border for flush thumbnails
   },
   framePlaceholder: {
     width: '100%',
     height: '100%',
     backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: moderateScale(4),
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 0, // No rounded corners
+    borderWidth: 0, // No border
   },
   loadingContainer: {
     position: 'absolute',

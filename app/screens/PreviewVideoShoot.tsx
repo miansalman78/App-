@@ -11,6 +11,7 @@ import LottieView from "lottie-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import ImageItem from "../../components/ImageItem";
 import StickerItem from "../../components/StickerItem";
 import TextItem from "../../components/TextItem";
 import VolumeControl from "../../components/VolumeControl";
@@ -1590,6 +1591,35 @@ const PreviewVideoShoot = () => {
     handleVideoEdit('addSticker', { sticker, size });
   };
 
+  const handleImageAdd = (imageUri: string, width: number, height: number, timestamp?: number) => {
+    console.log('📸 Adding image:', imageUri, 'width:', width, 'height:', height, 'timestamp:', timestamp);
+    
+    // Calculate center position
+    const imageSize = Math.min(Math.max(width, height), 200); // Max 200px
+    const centerX = (SCREEN_WIDTH - imageSize) / 2;
+    const centerY = 100; // Near top for visibility
+    
+    const newImage = {
+      id: Date.now().toString(),
+      imageUri,
+      x: centerX,
+      y: centerY,
+      size: imageSize,
+      rotation: 0,
+      timestamp: timestamp || currentTime,
+      isSelected: true, // Auto-select for immediate feedback
+    };
+    
+    setImageOverlays(prev => {
+      const updated = [...prev, newImage];
+      console.log('✅ Image overlay added. Total images:', updated.length);
+      console.log('📋 All images:', updated.map(img => ({ id: img.id, x: img.x, y: img.y, size: img.size })));
+      return updated;
+    });
+    
+    Alert.alert('Success', `Image added! Total: ${imageOverlays.length + 1}`);
+  };
+
   const handleStickerSelect = (stickerId: string) => {
     setStickerOverlays(prev => 
       prev.map(sticker => ({
@@ -2179,6 +2209,88 @@ const PreviewVideoShoot = () => {
                   styles={styles}
                 />
               ))}
+
+              {/* Image Overlays */}
+              {imageOverlays.map((image, index) => {
+                // Convert size to width/height for ImageItem component
+                const aspectRatio = 1; // Default square, can be enhanced later
+                const imageWidth = image.size;
+                const imageHeight = image.size / aspectRatio;
+                
+                console.log(`🖼️ Rendering image ${index}:`, {
+                  id: image.id,
+                  uri: image.imageUri.substring(0, 50),
+                  x: image.x,
+                  y: image.y,
+                  width: imageWidth,
+                  height: imageHeight,
+                  isSelected: image.isSelected
+                });
+                
+                return (
+                  <ImageItem
+                    key={image.id}
+                    imageItem={{
+                      id: image.id,
+                      imageUri: image.imageUri,
+                      x: image.x,
+                      y: image.y,
+                      width: imageWidth,
+                      height: imageHeight,
+                      rotation: image.rotation,
+                      isSelected: image.isSelected
+                    }}
+                    onSelect={(id) => {
+                      setImageOverlays(prev => 
+                        prev.map(img => ({
+                          ...img,
+                          isSelected: img.id === id ? !img.isSelected : false
+                        }))
+                      );
+                    }}
+                    onRemove={(id) => {
+                      Alert.alert(
+                        'Remove Image',
+                        'Are you sure you want to remove this image?',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { 
+                            text: 'Remove', 
+                            style: 'destructive',
+                            onPress: () => {
+                              setImageOverlays(prev => prev.filter(img => img.id !== id));
+                              Alert.alert('Success', 'Image removed successfully!');
+                            }
+                          }
+                        ]
+                      );
+                    }}
+                    onResize={(id, newWidth, newHeight) => {
+                      // Convert back to size
+                      const newSize = Math.max(newWidth, newHeight);
+                      setImageOverlays(prev => 
+                        prev.map(img => 
+                          img.id === id 
+                            ? { ...img, size: Math.max(50, Math.min(300, newSize)) }
+                            : img
+                        )
+                      );
+                    }}
+                    onPositionUpdate={(id, x, y) => {
+                      setImageOverlays(prev => 
+                        prev.map(img => 
+                          img.id === id 
+                            ? { ...img, x, y }
+                            : img
+                        )
+                      );
+                    }}
+                    screenWidth={SCREEN_WIDTH}
+                    screenHeight={Dimensions.get('window').height}
+                    styles={styles}
+                  />
+                );
+              })}
             </View>
 
             {/* Video Timeline - CapCut Style (with trim handles) */}
@@ -2555,6 +2667,9 @@ const PreviewVideoShoot = () => {
               {activeEditorTool === 'stickers' && (
                 <StickerOverlay
                   onAddSticker={handleStickerAdd}
+                  onAddImage={handleImageAdd}
+                  currentTime={currentTime}
+                  videoDuration={videoDuration}
                 />
               )}
               
@@ -3007,6 +3122,12 @@ const styles = StyleSheet.create({
    },
    stickerText: {
      textAlign: 'center',
+   },
+   imageOverlay: {
+     position: 'absolute',
+     zIndex: 10,
+     backgroundColor: 'transparent',
+     overflow: 'hidden',
    },
    toasterContainer: {
      borderBottomWidth: 1,
