@@ -1,6 +1,20 @@
-# Teleprompter App 📱
+# 📹 Teleprompter Video Recording & Editing App
 
-A professional teleprompter application built with React Native and Expo, designed for creating high-quality video presentations. This app features advanced video editing capabilities, script management, and a user-friendly interface.
+**Version 1.1.0** | **Milestone 2 & 3 Complete** | **100% Offline Video Editing**
+
+A professional teleprompter and video editing application built with React Native and Expo. Features comprehensive offline video editing powered by FFmpeg-kit, AWS S3 cloud storage, and cross-platform support for iOS and Android devices including Surface Duo.
+
+---
+
+## 🎯 Project Overview
+
+This is a complete video recording and editing module with:
+- ✅ **Teleprompter Recording** - Record videos while reading scripts
+- ✅ **Offline Video Editing** - Trim, split, overlay, transitions (no internet required)
+- ✅ **FFmpeg-kit Integration** - Professional video processing on-device
+- ✅ **AWS S3 Upload** - Optional cloud storage with 7-day auto-deletion
+- ✅ **Cross-Platform** - iOS, Android (including Surface Duo), Web
+- ✅ **No Paid SDKs** - 100% open-source libraries
 
 ## ✨ Key Features
 

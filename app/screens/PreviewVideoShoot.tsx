@@ -9,7 +9,7 @@ import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import LottieView from "lottie-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, SafeAreaView, Platform, StatusBar } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import ImageItem from "../../components/ImageItem";
 import StickerItem from "../../components/StickerItem";
@@ -37,7 +37,13 @@ import AWSS3Service from "../../utils/awsS3Service";
 // Enhanced FFmpeg Service
 import FFmpegService from "../../utils/ffmpegService";
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Get screen dimensions - use 'window' for current visible area
+const getScreenDimensions = () => {
+  const { width, height } = Dimensions.get('window');
+  return { width, height };
+};
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = getScreenDimensions();
 
 const PreviewVideoShoot = () => {
   const router = useRouter();
@@ -79,6 +85,8 @@ const PreviewVideoShoot = () => {
     fontFamily: string;
     alignment: 'left' | 'center' | 'right';
     timestamp: number;
+    startTime: number;
+    endTime: number;
     isSelected?: boolean;
     animation?: 'fade' | 'slide' | 'bounce' | 'zoom' | 'rotate' | 'scale-in' | 'none';
   }>>([]);
@@ -87,6 +95,16 @@ const PreviewVideoShoot = () => {
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<AudioTrack | null>(null);
   const [audioVolume, setAudioVolume] = useState<number>(0.5);
   const [isProcessingAudio, setIsProcessingAudio] = useState<boolean>(false);
+  
+  // Audio Tracks for Timeline (multiple audio overlays)
+  const [audioTracks, setAudioTracks] = useState<Array<{
+    id: string;
+    name: string;
+    uri: string;
+    startTime: number;
+    endTime: number;
+    volume: number;
+  }>>([]);
   
   // Audio Player for background music
   const audioPlayerRef = useRef<Audio.Sound | null>(null);
@@ -129,6 +147,8 @@ const PreviewVideoShoot = () => {
     size: number;
     rotation: number;
     timestamp: number;
+    startTime: number;
+    endTime: number;
     isSelected: boolean;
   }>>([]);
 
@@ -141,6 +161,8 @@ const PreviewVideoShoot = () => {
     size: number;
     rotation: number;
     timestamp: number;
+    startTime: number;
+    endTime: number;
     isSelected: boolean;
   }>>([]);
   
@@ -149,6 +171,28 @@ const PreviewVideoShoot = () => {
   const [videoFrames, setVideoFrames] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoadingVideo, setIsLoadingVideo] = useState(true);
+  
+  // Video Split Points for timeline gaps
+  const [splitPoints, setSplitPoints] = useState<Array<{
+    time: number; // Time in seconds where split occurs
+    id: string;
+    transitionType?: string; // Optional transition effect
+  }>>([]);
+  
+  // Track which split point is being edited for transition
+  const [activeSplitForTransition, setActiveSplitForTransition] = useState<{
+    id: string;
+    time: number;
+  } | null>(null);
+  
+  // Video segments created by splits (for deletion)
+  const [videoSegments, setVideoSegments] = useState<Array<{
+    id: string;
+    startTime: number;
+    endTime: number;
+    isDeleted: boolean;
+  }>>([]);
+  
   // Simulated trim bounds (in seconds, relative to original video)
   const [trimStartSec, setTrimStartSec] = useState<number>(0);
   const [trimEndSec, setTrimEndSec] = useState<number | null>(null);
@@ -158,6 +202,123 @@ const PreviewVideoShoot = () => {
   const [uiSplitTime, setUiSplitTime] = useState<number>(0);
 
   const getFullDuration = () => (videoMetadata?.duration || player?.duration || 0);
+
+  // Calculate effective duration (excluding deleted segments)
+  const getEffectiveDuration = () => {
+    if (videoSegments.length === 0) {
+      return getFullDuration();
+    }
+    
+    const activeSegments = videoSegments.filter(seg => !seg.isDeleted);
+    return activeSegments.reduce((total, seg) => total + (seg.endTime - seg.startTime), 0);
+  };
+
+  // Get active segments with virtual timeline mapping (0-based)
+  const getActiveSegmentsWithVirtualTime = () => {
+    if (videoSegments.length === 0) return [];
+    
+    const activeSegs = videoSegments.filter(seg => !seg.isDeleted);
+    let virtualStart = 0;
+    
+    return activeSegs.map(seg => {
+      const duration = seg.endTime - seg.startTime;
+      const virtualSeg = {
+        ...seg,
+        virtualStart,
+        virtualEnd: virtualStart + duration,
+        originalStart: seg.startTime,
+        originalEnd: seg.endTime,
+      };
+      virtualStart += duration;
+      return virtualSeg;
+    });
+  };
+
+  // Convert current playback time to virtual timeline position
+  const getCurrentVirtualTime = () => {
+    if (videoSegments.length === 0) return currentTime;
+    
+    const virtualSegs = getActiveSegmentsWithVirtualTime();
+    
+    // Find which segment contains current time
+    for (const seg of virtualSegs) {
+      if (currentTime >= seg.originalStart && currentTime <= seg.originalEnd) {
+        const offsetInSegment = currentTime - seg.originalStart;
+        return seg.virtualStart + offsetInSegment;
+      }
+    }
+    
+    return 0; // Default to start if not in any segment
+  };
+
+  // Handle segment deletion
+  const handleSegmentDelete = (segmentId: string) => {
+    console.log('🔍 handleSegmentDelete called with:', segmentId);
+    const segment = videoSegments.find(s => s.id === segmentId);
+    if (!segment) {
+      console.log('⚠️ Segment not found:', segmentId);
+      return;
+    }
+
+    console.log('📋 Segment to delete:', segment);
+
+    Alert.alert(
+      'Delete Segment',
+      `Delete segment from ${formatTimeDisplay(segment.startTime)} to ${formatTimeDisplay(segment.endTime)} (${formatTimeDisplay(segment.endTime - segment.startTime)} duration)?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            console.log('✂️ Deleting segment:', segmentId);
+            
+            setVideoSegments(prev => {
+              const updated = prev.map(seg => 
+                seg.id === segmentId ? { ...seg, isDeleted: true } : seg
+              );
+              console.log('📊 Updated segments:', updated);
+              console.log('⏱️ New effective duration:', 
+                updated.filter(s => !s.isDeleted).reduce((total, s) => total + (s.endTime - s.startTime), 0)
+              );
+              return updated;
+            });
+            
+            // Remove split points that were in the deleted segment
+            setSplitPoints(prev => {
+              const filtered = prev.filter(split => {
+                // Keep split if it's not in the deleted segment
+                return !(split.time >= segment.startTime && split.time <= segment.endTime);
+              });
+              console.log('🔪 Split points after deletion:', filtered.length, 'remaining');
+              return filtered;
+            });
+            
+            // Reset current time if it was in deleted segment
+            if (currentTime >= segment.startTime && currentTime <= segment.endTime) {
+              const activeSegment = videoSegments.find(s => !s.isDeleted && s.id !== segmentId);
+              if (activeSegment) {
+                console.log('⏩ Moving playhead to:', activeSegment.startTime);
+                setCurrentTime(activeSegment.startTime);
+                if (player) player.currentTime = activeSegment.startTime;
+              }
+            }
+            
+            Alert.alert('Segment Deleted', 'Timeline and seekbar updated. Effective duration changed.');
+            console.log('✅ Segment deletion complete');
+          }
+        }
+      ]
+    );
+  };
+
+  // Format time in seconds to MM:SS format
+  const formatTimeDisplay = (seconds: number): string => {
+    if (seconds < 0 || isNaN(seconds)) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const normalizeSegments = (list: Array<{ start: number; end: number }>) => {
     const merged = [...list]
@@ -377,12 +538,19 @@ const PreviewVideoShoot = () => {
           const isPlaying = player.playing;
           setIsVideoPlaying(isPlaying);
           
-          if (isPlaying) {
+          // Check if current time is within any audio track's time range
+          const shouldPlayAudio = audioTracks.some(track => 
+            currentTime >= track.startTime && currentTime <= track.endTime
+          );
+          
+          if (isPlaying && shouldPlayAudio) {
             await audioPlayerRef.current.playAsync();
-            console.log('Audio started playing with video');
+            console.log('Audio started playing with video (within timeline range)');
           } else {
             await audioPlayerRef.current.pauseAsync();
-            console.log('Audio paused with video');
+            if (!shouldPlayAudio && isPlaying) {
+              console.log('Audio paused - outside timeline range');
+            }
           }
         } catch (error) {
           console.error('Error syncing audio with video:', error);
@@ -408,7 +576,7 @@ const PreviewVideoShoot = () => {
     };
 
     syncAudioWithVideo();
-  }, [player?.playing, isAudioLoaded, isVoiceLoaded]);
+  }, [player?.playing, isAudioLoaded, isVoiceLoaded, currentTime, audioTracks]);
 
   // Monitor audio duration synchronization while playing (optimized)
   useEffect(() => {
@@ -435,6 +603,45 @@ const PreviewVideoShoot = () => {
 
     return () => clearInterval(syncInterval);
   }, [isVideoPlaying, isVoiceLoaded, videoDuration]);
+
+  // Monitor split points and activate transitions during playback
+  useEffect(() => {
+    if (!isVideoPlaying) {
+      setActiveTransition(null); // Clear transition when video stops
+      return;
+    }
+    
+    if (splitPoints.length === 0) {
+      return;
+    }
+
+    // Check if we're at a split point with a transition
+    const transitionDuration = 1.0; // 1 second transition effect
+    const tolerance = 0.1; // Tolerance for timing
+
+    splitPoints.forEach(split => {
+      if (!split.transitionType || split.transitionType === 'none') return;
+
+      const timeDiff = Math.abs(currentTime - split.time);
+      
+      // If we're within the transition time window
+      if (timeDiff < transitionDuration / 2 + tolerance) {
+        // Calculate progress (0 to 1)
+        const progress = Math.min(1, Math.max(0, (currentTime - (split.time - transitionDuration / 2)) / transitionDuration));
+        
+        setActiveTransition({
+          id: split.id,
+          name: split.transitionType,
+          progress: progress,
+        });
+        
+        console.log(`🎬 Transition active: ${split.transitionType} at ${split.time}s, progress: ${progress.toFixed(2)}`);
+      } else if (activeTransition?.id === split.id) {
+        // Clear transition when we're past it
+        setActiveTransition(null);
+      }
+    });
+  }, [currentTime, isVideoPlaying, splitPoints]);
 
   // Reset audio position when video is restarted (optimized)
   useEffect(() => {
@@ -676,6 +883,37 @@ const PreviewVideoShoot = () => {
         player.currentTime = start;
       }
       console.log('Auto-initialized video trim:', { start, end, full });
+    }
+  };
+
+  // Re-extract frames based on current trim selection
+  const updateFramesForTrim = async (startSec: number, endSec: number) => {
+    if (!videoUri) return;
+    
+    try {
+      console.log(`🎬 Updating frames for trim: ${startSec}s to ${endSec}s`);
+      const trimDuration = endSec - startSec;
+      const frameCount = Math.max(3, Math.ceil(trimDuration));
+      
+      setIsLoadingVideo(true);
+      
+      // Extract frames for the trimmed portion
+      const frames = await VideoProcessor.extractVideoFrames(
+        videoUri, 
+        frameCount,
+        0.5, // frame interval
+        startSec, // start time
+        endSec    // end time
+      );
+      
+      const thumbnails = frames.map(f => f.thumbnail).filter(Boolean);
+      setVideoFrames(thumbnails);
+      
+      console.log(`✅ Extracted ${thumbnails.length} frames for trimmed portion`);
+      setIsLoadingVideo(false);
+    } catch (error) {
+      console.error('Error updating frames for trim:', error);
+      setIsLoadingVideo(false);
     }
   };
 
@@ -986,6 +1224,32 @@ const PreviewVideoShoot = () => {
         setUploadStatus('completed');
         setUploadProgress(100);
         
+        // **IMPORTANT: Update video in AsyncStorage with uploaded status**
+        try {
+          const savedVideos = await AsyncStorage.getItem('saved_videos');
+          if (savedVideos) {
+            let videos = JSON.parse(savedVideos);
+            const videoIndex = videos.findIndex((v: any) => v.uri === videoUri);
+            
+            if (videoIndex !== -1) {
+              // Update existing video with upload info
+              videos[videoIndex] = {
+                ...videos[videoIndex],
+                uploaded: true, // Mark as uploaded
+                uploadedAt: new Date().toISOString(),
+                s3Key: uploadResult.key,
+                s3Url: uploadResult.url,
+                expiresAt: uploadResult.expiresAt,
+                flaggedForUpload: true,
+              };
+              await AsyncStorage.setItem('saved_videos', JSON.stringify(videos));
+              console.log('✅ Video marked as uploaded in storage');
+            }
+          }
+        } catch (storageError) {
+          console.error('Failed to update video storage:', storageError);
+        }
+        
         // Show success message
         Alert.alert(
           'Upload Successful',
@@ -1038,59 +1302,84 @@ const PreviewVideoShoot = () => {
     }
   };
 
+  /**
+   * Handle video save to local storage
+   * FIXED: Preserves AWS upload status when saving
+   * AWS upload happens separately via cloud icon (handleVideoUploadToggle)
+   * Location: Lines 1279-1358
+   */
   const handleApprove = async () => {
     if (!videoUri) return;
 
+    console.log('💾 Saving video to local storage...');
+    console.log('Current upload status:', uploadStatus);
+    console.log('Flagged for upload:', flaggedForUpload);
+    
     setIsUploaded(true);
-    setUploadStatus('uploading');
+    const previousUploadStatus = uploadStatus; // Preserve upload status
 
     try {
-      // Simulate upload process with proper status updates
-      setTimeout(async () => {
-        try {
-          const savedVideos = await AsyncStorage.getItem('saved_videos');
-          let videos = savedVideos ? JSON.parse(savedVideos) : [];
-          
-          // Check if video already exists in the list
-          const existingVideoIndex = videos.findIndex((video: any) => video.uri === videoUri);
-          
-          if (existingVideoIndex !== -1) {
-            // Update existing video
-            videos[existingVideoIndex] = { 
-              ...videos[existingVideoIndex], 
-              uploaded: true, 
-              uploadedAt: new Date().toISOString() 
-            };
-          } else {
-            // Add new video to the list (for uploaded videos from gallery)
-            const newVideo = {
-              id: Date.now().toString(),
-              uri: videoUri,
-              mode: 'uploaded', // Mark as uploaded video
-              createdAt: new Date().toISOString(),
-              flaggedForUpload: true, // Flag for AWS upload
-              uploaded: true,
-              uploadedAt: new Date().toISOString(),
-              title: 'Uploaded Video',
-              duration: videoMetadata?.duration || 0, // Use actual video duration
-              fileSize: 0 // Will be updated if needed
-            };
-            videos.unshift(newVideo); // Add to beginning of list
-          }
-          
-          await AsyncStorage.setItem('saved_videos', JSON.stringify(videos));
-          setUploadStatus('completed');
-          console.log("✅ Video uploaded successfully");
-        } catch (error) {
-          console.error('Error updating upload status:', error);
-          setUploadStatus('failed');
-          setIsUploaded(false);
-        }
-      }, 3000); // 3 second simulated upload
+      // Save video metadata to AsyncStorage (local storage only)
+      const savedVideos = await AsyncStorage.getItem('saved_videos');
+      let videos = savedVideos ? JSON.parse(savedVideos) : [];
+      
+      // Check if video already exists in the list
+      const existingVideoIndex = videos.findIndex((video: any) => video.uri === videoUri);
+      
+      if (existingVideoIndex !== -1) {
+        // Update existing video - PRESERVE AWS upload status
+        const existingVideo = videos[existingVideoIndex];
+        videos[existingVideoIndex] = { 
+          ...existingVideo,
+          lastEdited: new Date().toISOString(),
+          duration: videoMetadata?.duration || existingVideo.duration,
+          // IMPORTANT: Keep AWS upload status if already uploaded
+          uploaded: existingVideo.uploaded || (uploadStatus === 'completed'), // Preserve uploaded status
+          uploadedAt: existingVideo.uploadedAt || (uploadStatus === 'completed' ? new Date().toISOString() : null),
+          flaggedForUpload: existingVideo.flaggedForUpload || flaggedForUpload,
+          s3Key: existingVideo.s3Key, // Keep S3 key if exists
+        };
+        console.log('📝 Updated existing video - Upload status preserved:', videos[existingVideoIndex].uploaded);
+      } else {
+        // Add new video to the list
+        const newVideo = {
+          id: Date.now().toString(),
+          uri: videoUri,
+          mode: 'saved', // Mark as locally saved
+          createdAt: new Date().toISOString(),
+          flaggedForUpload: flaggedForUpload, // Current flag status
+          uploaded: uploadStatus === 'completed', // TRUE if already uploaded to AWS
+          uploadedAt: uploadStatus === 'completed' ? new Date().toISOString() : null,
+          title: 'Saved Video',
+          duration: videoMetadata?.duration || 0,
+          fileSize: 0,
+        };
+        videos.unshift(newVideo);
+        console.log('📝 Added new video - Uploaded:', newVideo.uploaded);
+      }
+      
+      // Save to AsyncStorage (local only)
+      await AsyncStorage.setItem('saved_videos', JSON.stringify(videos));
+      console.log("✅ Video saved to local storage successfully");
+      
+      // Show success message with upload status
+      const uploadInfo = uploadStatus === 'completed' 
+        ? '\n✅ Video is uploaded to AWS S3' 
+        : '\n\nTip: Use the cloud icon to upload to AWS S3.';
+      
+      Alert.alert(
+        'Success',
+        `Video saved successfully!${uploadInfo}`,
+        [{ text: 'OK' }]
+      );
 
-    } catch (error) {
-      console.error("Video upload failed:", error);
-      setUploadStatus('failed');
+    } catch (error: any) {
+      console.error("❌ Video save failed:", error);
+      Alert.alert(
+        'Save Failed',
+        `Failed to save video: ${error.message || 'Unknown error'}`,
+        [{ text: 'OK' }]
+      );
       setIsUploaded(false);
     }
   };
@@ -1175,35 +1464,31 @@ const PreviewVideoShoot = () => {
               if (selectedTrack && selectedTrack.id && selectedTrack.name) {
                 setSelectedAudioTrack(selectedTrack);
                 
-                // Mix audio with video using AudioProcessor
-                const mixOptions: AudioMixOptions = {
+                // Add to timeline array instead of mixing immediately
+                const videoDur = getFullDuration();
+                const startTime = currentTime;
+                
+                const newAudioTrack = {
+                  id: Date.now().toString(),
+                  name: selectedTrack.name,
+                  uri: selectedTrack.uri || '',
+                  startTime: startTime,
+                  endTime: Math.min(startTime + 3, videoDur), // Default 3 seconds
                   volume: audioVolume,
-                  startTime: 0,
-                  fadeIn: 2, // 2 second fade in
-                  fadeOut: 2 // 2 second fade out
                 };
                 
-                const outputPath = await AudioProcessor.mixAudioWithVideo(
-                  videoUri,
-                  selectedTrack,
-                  mixOptions
-                );
+                setAudioTracks(prev => {
+                  const updated = [...prev, newAudioTrack];
+                  console.log('✅ Audio track added to timeline:', newAudioTrack);
+                  console.log('📊 Total audio tracks:', updated.length);
+                  return updated;
+                });
                 
-                if (outputPath) {
-                  // Store the original video URI before updating
-                  const originalVideoUri = videoUri;
-                  
-                  // Update video URI to the new mixed version
-                  setVideoUri(outputPath);
-                  await updateVideoInStorage(outputPath, originalVideoUri);
-                  Alert.alert(
-                    'Success', 
-                    `Music "${selectedTrack.name}" has been added to your video successfully!`,
-                    [{ text: 'OK' }]
-                  );
-                } else {
-                  throw new Error('Failed to mix audio with video');
-                }
+                Alert.alert(
+                  'Success', 
+                  `Music "${selectedTrack.name}" added to timeline! It will play for 3 seconds.`,
+                  [{ text: 'OK' }]
+                );
               } else {
                 Alert.alert('Error', 'Invalid music track selected');
               }
@@ -1407,7 +1692,8 @@ const PreviewVideoShoot = () => {
         case 'addSticker':
           console.log('Adding sticker overlay:', data.sticker, 'size:', data.size);
           // Add sticker to overlay state instead of FFmpeg processing
-          const newSticker: { id: string; sticker: string; x: number; y: number; size: number; rotation: number; timestamp: number; isSelected: boolean } = {
+          const videoDur = getFullDuration();
+          const newSticker: { id: string; sticker: string; x: number; y: number; size: number; rotation: number; timestamp: number; startTime: number; endTime: number; isSelected: boolean } = {
             id: `sticker_${Date.now()}`,
             sticker: data.sticker,
             x: 50, // Default position
@@ -1415,11 +1701,13 @@ const PreviewVideoShoot = () => {
             size: data.size || 40,
             rotation: 0,
             timestamp: currentTime,
+            startTime: currentTime,
+            endTime: Math.min(currentTime + 3, videoDur), // Default 3 seconds or until video end
             isSelected: false,
           };
           setStickerOverlays(prev => [...prev, newSticker]);
           setActiveEditorTool('stickers');
-          Alert.alert('Success', 'Sticker added successfully!');
+          Alert.alert('Success', 'Sticker added! It will appear for 3 seconds.');
           break;
           
         default:
@@ -1559,6 +1847,9 @@ const PreviewVideoShoot = () => {
   const handleTextAdd = (text: string, style: any) => {
     console.log('Adding text:', text, style);
     
+    const videoDur = getFullDuration();
+    const startTime = currentTime;
+    
     // Create a new text overlay
     const newOverlay = {
       id: Date.now().toString(),
@@ -1569,7 +1860,9 @@ const PreviewVideoShoot = () => {
       color: style?.color || '#FFFFFF',
       fontFamily: style?.fontFamily || 'System',
       alignment: style?.alignment || 'center' as 'left' | 'center' | 'right',
-      timestamp: currentTime,
+      timestamp: startTime,
+      startTime: startTime,
+      endTime: Math.min(startTime + 3, videoDur), // Default 3 seconds
       isSelected: false,
       animation: style?.animation || 'fade' as 'fade' | 'slide' | 'bounce' | 'zoom' | 'rotate' | 'scale-in' | 'none',
     };
@@ -1581,7 +1874,7 @@ const PreviewVideoShoot = () => {
     setActiveEditorTool('text');
     
     // Show success message
-    Alert.alert('Success', `Text overlay added with ${style?.animation || 'fade'} animation!`);
+    Alert.alert('Success', `Text overlay added! It will appear for 3 seconds.`);
   };
 
   const handleStickerAdd = (sticker: string, size: number) => {
@@ -1599,6 +1892,9 @@ const PreviewVideoShoot = () => {
     const centerX = (SCREEN_WIDTH - imageSize) / 2;
     const centerY = 100; // Near top for visibility
     
+    const videoDur = getFullDuration();
+    const startTime = timestamp || currentTime;
+    
     const newImage = {
       id: Date.now().toString(),
       imageUri,
@@ -1606,25 +1902,90 @@ const PreviewVideoShoot = () => {
       y: centerY,
       size: imageSize,
       rotation: 0,
-      timestamp: timestamp || currentTime,
+      timestamp: startTime,
+      startTime: startTime,
+      endTime: Math.min(startTime + 3, videoDur), // Default 3 seconds or until video end
       isSelected: true, // Auto-select for immediate feedback
     };
     
     setImageOverlays(prev => {
       const updated = [...prev, newImage];
       console.log('✅ Image overlay added. Total images:', updated.length);
-      console.log('📋 All images:', updated.map(img => ({ id: img.id, x: img.x, y: img.y, size: img.size })));
+      console.log('📋 All images:', updated.map(img => ({ id: img.id, x: img.x, y: img.y, size: img.size, startTime: img.startTime, endTime: img.endTime })));
       return updated;
     });
     
-    Alert.alert('Success', `Image added! Total: ${imageOverlays.length + 1}`);
+    Alert.alert('Success', `Image added! It will appear for 3 seconds.`);
+  };
+
+  // Handle video split at current time
+  /**
+   * Handle video split at current time
+   * FIXED: Now respects trim bounds - segments created within trimmed range only
+   */
+  const handleSplit = () => {
+    // Get effective video bounds (respecting trim)
+    const fullDuration = getFullDuration();
+    const effectiveStart = trimStartSec || 0;
+    const effectiveEnd = trimEndSec ?? fullDuration;
+    
+    if (currentTime <= effectiveStart || currentTime >= effectiveEnd) {
+      Alert.alert('Cannot Split', 'Please position the playhead within the trimmed video range.');
+      return;
+    }
+
+    // Check if split already exists at this time
+    const existingSplit = splitPoints.find(
+      split => Math.abs(split.time - currentTime) < 0.1
+    );
+
+    if (existingSplit) {
+      Alert.alert('Split Exists', 'A split already exists at this position.');
+      return;
+    }
+
+    // Add split point
+    const newSplit = {
+      id: Date.now().toString(),
+      time: currentTime,
+      transitionType: 'none', // Default no transition
+    };
+
+    const updatedSplits = [...splitPoints, newSplit].sort((a, b) => a.time - b.time);
+    setSplitPoints(updatedSplits);
+    
+    // Create video segments from splits - RESPECTING TRIM BOUNDS
+    // Use trimmed range instead of full video
+    const splitTimes = [effectiveStart, ...updatedSplits.map(s => s.time), effectiveEnd];
+    const newSegments = [];
+    
+    for (let i = 0; i < splitTimes.length - 1; i++) {
+      newSegments.push({
+        id: `segment-${i}-${Date.now()}`,
+        startTime: splitTimes[i],
+        endTime: splitTimes[i + 1],
+        isDeleted: false,
+      });
+    }
+    
+    setVideoSegments(newSegments);
+    console.log('📊 Created segments (respecting trim):', newSegments);
+    console.log('🎬 Trim bounds:', { start: effectiveStart, end: effectiveEnd });
+    
+    Alert.alert(
+      'Video Split',
+      `Video split at ${currentTime.toFixed(1)}s. Tap segments on timeline to delete them.\n\nNote: Split respects trim bounds (${effectiveStart.toFixed(1)}s - ${effectiveEnd.toFixed(1)}s)`,
+      [{ text: 'OK' }]
+    );
+    
+    console.log('✂️ Video split at:', currentTime, 'Total splits:', updatedSplits.length);
   };
 
   const handleStickerSelect = (stickerId: string) => {
     setStickerOverlays(prev => 
       prev.map(sticker => ({
         ...sticker,
-        isSelected: sticker.id === stickerId ? !sticker.isSelected : false
+        isSelected: sticker.id === stickerId ? !sticker.isSelected : false,
       }))
     );
   };
@@ -1739,6 +2100,15 @@ const PreviewVideoShoot = () => {
   };
 
 
+  // Handle split icon click to add transition
+  const handleSplitIconClick = (splitId: string, time: number) => {
+    console.log('✂️ Split icon clicked:', splitId, 'at time:', time);
+    setActiveSplitForTransition({ id: splitId, time });
+    setActiveEditorTool('transitions');
+    setShowVideoEditor(true); // Open the modal
+    console.log('🎬 Opening transition editor for split point');
+  };
+
   const handleTransitionAdd = (transitionEffect: {
     id: string;
     name: string;
@@ -1747,7 +2117,29 @@ const PreviewVideoShoot = () => {
     duration: number;
   }) => {
     console.log('Adding transition effect:', transitionEffect);
-    setTransitionEffects(prev => [...prev, transitionEffect]);
+    
+    // If adding transition to a split point
+    if (activeSplitForTransition) {
+      setSplitPoints(prev => prev.map(split => 
+        split.id === activeSplitForTransition.id 
+          ? { ...split, transitionType: transitionEffect.name }
+          : split
+      ));
+      
+      Alert.alert(
+        'Transition Added',
+        `${transitionEffect.name} transition added to split at ${activeSplitForTransition.time.toFixed(1)}s`,
+        [{ text: 'OK' }]
+      );
+      
+      setActiveSplitForTransition(null);
+      setActiveEditorTool(null);
+      setShowVideoEditor(false); // Close the modal
+      console.log('✅ Transition applied to split point');
+    } else {
+      // Regular transition (not on split point)
+      setTransitionEffects(prev => [...prev, transitionEffect]);
+    }
   };
 
   const handleTransitionRemove = (transitionId: string) => {
@@ -2025,6 +2417,26 @@ const PreviewVideoShoot = () => {
 
       // Set the audio track in context
       setAudioTrack(newAudioTrack);
+      
+      // Add to timeline tracks for visual display
+      const videoDur = getFullDuration();
+      const startTime = currentTime;
+      
+      const timelineAudioTrack = {
+        id: Date.now().toString() + '_timeline',
+        name: audioName,
+        uri: audioUri,
+        startTime: startTime,
+        endTime: Math.min(startTime + 3, videoDur), // Default 3 seconds
+        volume: audioVolume,
+      };
+      
+      setAudioTracks(prev => {
+        const updated = [...prev, timelineAudioTrack];
+        console.log('✅ Audio track added to timeline from VolumeControl:', timelineAudioTrack);
+        console.log('📊 Total audio tracks:', updated.length);
+        return updated;
+      });
 
       console.log('Loading audio file:', { audioUri, audioName });
       
@@ -2115,9 +2527,10 @@ const PreviewVideoShoot = () => {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      {!isUploaded && !(showDiscardModal && isDiscardConfirmed) ? (
-        <View style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        {!isUploaded && !(showDiscardModal && isDiscardConfirmed) ? (
+          <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -2155,11 +2568,115 @@ const PreviewVideoShoot = () => {
                 player={player}
                 allowsFullscreen
                 allowsPictureInPicture
+                nativeControls={false}
               />
               
-              {/* Play/Pause Overlay Button */}
+              {/* Custom Controls Container */}
+              <View style={styles.customControlsContainer}>
+                {/* Time Display */}
+                <Text style={styles.customTimeText}>
+                  {formatTimeDisplay((() => {
+                    // Use virtual time if segments exist
+                    if (videoSegments.length > 0) {
+                      return getCurrentVirtualTime();
+                    }
+                    return currentTime - (trimStartSec || 0);
+                  })())} / {formatTimeDisplay((() => {
+                    // Use effective duration if segments are deleted
+                    if (videoSegments.length > 0) {
+                      return getEffectiveDuration();
+                    }
+                    const full = getFullDuration();
+                    const start = trimStartSec || 0;
+                    const end = trimEndSec ?? full;
+                    return end - start;
+                  })())}
+                </Text>
+                
+                {/* Custom Seekbar */}
+                <View style={styles.customSeekbarContainer}>
+                  <View style={styles.customSeekbarTrack}>
+                    {/* Progress Bar */}
+                    <View 
+                      style={[
+                        styles.customSeekbarProgress,
+                        {
+                          width: `${(() => {
+                            let duration;
+                            let relativeTime;
+                            
+                            if (videoSegments.length > 0) {
+                              duration = getEffectiveDuration();
+                              relativeTime = getCurrentVirtualTime();
+                            } else {
+                              const full = getFullDuration();
+                              const start = trimStartSec || 0;
+                              const end = trimEndSec ?? full;
+                              duration = end - start;
+                              relativeTime = currentTime - start;
+                            }
+                            
+                            return duration > 0 ? (relativeTime / duration) * 100 : 0;
+                          })()}%`
+                        }
+                      ]} 
+                    />
+                  </View>
+                  
+                  {/* Playhead Thumb */}
+                  <View 
+                    style={[
+                      styles.customSeekbarThumb,
+                      {
+                        left: `${(() => {
+                          let duration;
+                          let relativeTime;
+                          
+                          if (videoSegments.length > 0) {
+                            duration = getEffectiveDuration();
+                            relativeTime = getCurrentVirtualTime();
+                          } else {
+                            const full = getFullDuration();
+                            const start = trimStartSec || 0;
+                            const end = trimEndSec ?? full;
+                            duration = end - start;
+                            relativeTime = currentTime - start;
+                          }
+                          
+                          return duration > 0 ? (relativeTime / duration) * 100 : 0;
+                        })()}%`
+                      }
+                    ]}
+                  />
+                  
+                  {/* Touch Area for Seeking */}
+                  <TouchableOpacity
+                    style={styles.customSeekbarTouchArea}
+                    activeOpacity={1}
+                    onPress={(e) => {
+                      const { locationX } = e.nativeEvent;
+                      const seekbarWidth = SCREEN_WIDTH * 0.9;
+                      const percentage = locationX / seekbarWidth;
+                      
+                      const full = getFullDuration();
+                      const start = trimStartSec || 0;
+                      const end = trimEndSec ?? full;
+                      const duration = end - start;
+                      
+                      const newTime = start + (duration * percentage);
+                      setCurrentTime(newTime);
+                      if (player) {
+                        player.currentTime = newTime;
+                      }
+                    }}
+                  />
+                </View>
+              </View>
+              
+              {/* Play/Pause Button Overlay */}
               <TouchableOpacity 
-                style={styles.playPauseOverlay}
+                style={styles.videoTapArea}
+                activeOpacity={1}
                 onPress={() => {
                   if (player.playing) {
                     player.pause();
@@ -2170,11 +2687,11 @@ const PreviewVideoShoot = () => {
                   }
                 }}
               >
-                <MaterialIcons 
-                  name={player.playing ? "pause" : "play-arrow"} 
-                  size={moderateScale(50)} 
-                  color="rgba(255, 255, 255, 0.8)" 
-                />
+                {!player.playing && (
+                  <View style={styles.playPauseOverlay}>
+                    <MaterialIcons name="play-arrow" size={moderateScale(30)} color="#FFFFFF" />
+                  </View>
+                )}
               </TouchableOpacity>
                 
                 {/* Transition Effect Overlay */}
@@ -2182,8 +2699,10 @@ const PreviewVideoShoot = () => {
                   <View style={[styles.transitionOverlay, getTransitionStyle(activeTransition)]} />
                 )}
               
-              {/* Text Overlays */}
-              {textOverlays.map((overlay) => (
+              {/* Text Overlays - Only show when currentTime is within range */}
+              {textOverlays
+                .filter(overlay => currentTime >= overlay.startTime && currentTime <= overlay.endTime)
+                .map((overlay) => (
                 <TextItem
                   key={overlay.id}
                   textOverlay={overlay}
@@ -2196,22 +2715,26 @@ const PreviewVideoShoot = () => {
                 />
               ))}
 
-              {/* Sticker Overlays */}
-              {stickerOverlays.map((sticker) => (
-                <StickerItem
-                  key={sticker.id}
-                  sticker={sticker}
-                  onSelect={handleStickerSelect}
-                  onRemove={handleStickerRemove}
-                  onResize={handleStickerResize}
-                  onPositionUpdate={handleStickerPositionUpdate}
-                  screenWidth={SCREEN_WIDTH}
-                  styles={styles}
-                />
-              ))}
+              {/* Sticker Overlays - Only show when currentTime is within range */}
+              {stickerOverlays
+                .filter(sticker => currentTime >= sticker.startTime && currentTime <= sticker.endTime)
+                .map((sticker) => (
+                  <StickerItem
+                    key={sticker.id}
+                    sticker={sticker}
+                    onSelect={handleStickerSelect}
+                    onRemove={handleStickerRemove}
+                    onResize={handleStickerResize}
+                    onPositionUpdate={handleStickerPositionUpdate}
+                    screenWidth={SCREEN_WIDTH}
+                    styles={styles}
+                  />
+                ))}
 
-              {/* Image Overlays */}
-              {imageOverlays.map((image, index) => {
+              {/* Image Overlays - Only show when currentTime is within range */}
+              {imageOverlays
+                .filter(image => currentTime >= image.startTime && currentTime <= image.endTime)
+                .map((image, index) => {
                 // Convert size to width/height for ImageItem component
                 const aspectRatio = 1; // Default square, can be enhanced later
                 const imageWidth = image.size;
@@ -2296,13 +2819,15 @@ const PreviewVideoShoot = () => {
             {/* Video Timeline - CapCut Style (with trim handles) */}
             <VideoTimeline
               duration={(() => {
+                if (videoSegments.length > 0) return getEffectiveDuration();
                 if (segments.length > 0) return sumSegmentsDuration();
                 const full = getFullDuration();
-                const start = trimStartSec || 0;
-                const end = (trimEndSec ?? full);
-                return Math.max(0, end - start);
+                const start = Math.max(0, trimStartSec || 0);
+                const end = Math.min(trimEndSec ?? full, full);
+                return Math.max(0, Math.min(end - start, full));
               })()}
               currentTime={(() => {
+                if (videoSegments.length > 0) return getCurrentVirtualTime();
                 if (segments.length > 0) return toVirtualTime(currentTime);
                 return Math.max(0, (currentTime - (trimStartSec || 0)));
               })()}
@@ -2321,40 +2846,133 @@ const PreviewVideoShoot = () => {
                   player.currentTime = absoluteTime;
                 }
               }}
-              onTrimStart={(time) => {
-                const full = getFullDuration();
-                const end = (trimEndSec ?? full);
-                const start = Math.max(0, Math.min(time, end));
+              onTrimStart={(relativeTime) => {
+                // Convert relative time on timeline to absolute time in original video
+                const currentStart = trimStartSec || 0;
+                const currentEnd = trimEndSec ?? getFullDuration();
+                
+                // New absolute start = current start + relative position
+                const newStart = currentStart + relativeTime;
+                const start = Math.max(0, Math.min(newStart, currentEnd));
+                
+                console.log(`Trim Start: relative=${relativeTime}, currentStart=${currentStart}, newStart=${start}`);
+                
                 setTrimStartSec(start);
-                setSegments(normalizeSegments([{ start, end }]));
+                setSegments(normalizeSegments([{ start, end: currentEnd }]));
                 if (player) {
                   player.currentTime = start;
                 }
+                // Update frames for new trim range
+                updateFramesForTrim(start, currentEnd);
               }}
-              onTrimEnd={(time) => {
+              onTrimEnd={(relativeTime) => {
+                // Convert relative time on timeline to absolute time in original video
+                const currentStart = trimStartSec || 0;
                 const full = getFullDuration();
-                const start = trimStartSec || 0;
-                const end = Math.max(start, Math.min(time, full));
+                
+                // New absolute end = current start + relative position
+                const newEnd = currentStart + relativeTime;
+                const end = Math.max(currentStart, Math.min(newEnd, full));
+                
+                console.log(`Trim End: relative=${relativeTime}, currentStart=${currentStart}, newEnd=${end}`);
+                
                 setTrimEndSec(end);
-                setSegments(normalizeSegments([{ start, end }]));
+                setSegments(normalizeSegments([{ start: currentStart, end }]));
                 if (player) {
-                  player.currentTime = start;
+                  player.currentTime = currentStart;
                 }
+                // Update frames for new trim range
+                updateFramesForTrim(currentStart, end);
               }}
-              trimStart={(trimStartSec || 0)}
-              trimEnd={(trimEndSec ?? getFullDuration())}
+              trimStart={0}
+              trimEnd={(() => {
+                // Always show as full timeline of trimmed duration
+                const full = getFullDuration();
+                const start = Math.max(0, trimStartSec || 0);
+                const end = Math.min(trimEndSec ?? full, full);
+                return end - start; // Show trimmed duration as full range
+              })()}
               videoFrames={videoFrames}
               isLoading={isLoadingVideo}
+              overlays={(() => {
+                const allOverlays = [
+                  ...audioTracks.map(audio => ({
+                    id: audio.id,
+                    startTime: audio.startTime,
+                    endTime: audio.endTime,
+                    type: 'audio' as const,
+                    label: `🎵 ${audio.name.substring(0, 10)}${audio.name.length > 10 ? '...' : ''}`
+                  })),
+                ...textOverlays.map(text => ({
+                  id: text.id,
+                  startTime: text.startTime,
+                  endTime: text.endTime,
+                  type: 'text' as const,
+                  label: `📝 ${text.text.substring(0, 10)}${text.text.length > 10 ? '...' : ''}`
+                })),
+                ...imageOverlays.map(img => ({
+                  id: img.id,
+                  startTime: img.startTime,
+                  endTime: img.endTime,
+                  type: 'image' as const,
+                  label: '🖼️ Image'
+                })),
+                ...stickerOverlays.map(sticker => ({
+                  id: sticker.id,
+                  startTime: sticker.startTime,
+                  endTime: sticker.endTime,
+                  type: 'sticker' as const,
+                  label: sticker.sticker
+                }))
+                ];
+                console.log('🎬 Timeline Overlays:', {
+                  audio: audioTracks.length,
+                  text: textOverlays.length,
+                  images: imageOverlays.length,
+                  stickers: stickerOverlays.length,
+                  total: allOverlays.length
+                });
+                return allOverlays;
+              })()}
+              onOverlayTimeChange={(id, startTime, endTime) => {
+                // Update audio track timing
+                setAudioTracks(prev => prev.map(audio => 
+                  audio.id === id ? { ...audio, startTime, endTime } : audio
+                ));
+                // Update text overlay timing
+                setTextOverlays(prev => prev.map(text => 
+                  text.id === id ? { ...text, startTime, endTime } : text
+                ));
+                // Update image overlay timing
+                setImageOverlays(prev => prev.map(img => 
+                  img.id === id ? { ...img, startTime, endTime } : img
+                ));
+                // Update sticker overlay timing
+                setStickerOverlays(prev => prev.map(sticker => 
+                  sticker.id === id ? { ...sticker, startTime, endTime } : sticker
+                ));
+              }}
+              splitPoints={splitPoints}
+              onSplitPointClick={handleSplitIconClick}
+              videoSegments={videoSegments}
+              onSegmentDelete={handleSegmentDelete}
             />
             
             {/* Bottom Toolbar - CapCut Style */}
             <BottomToolbar 
               onToolSelect={(tool: string) => {
                 console.log('Tool selected:', tool);
-                // Cast to expected union where applicable
-                openVideoEditor(tool as 'edit' | 'text' | 'stickers' | 'audio' | 'filters' | 'transitions');
+                
+                // Handle Split button specially
+                if (tool === 'split') {
+                  handleSplit();
+                  return;
+                }
+                
+                // For other tools, open editor
+                openVideoEditor(tool as 'text' | 'stickers' | 'audio' | 'filters' | 'transitions');
               }}
-              activeTool="edit"
+              activeTool="split"
             />
           </ScrollView>
         </View>
@@ -2700,23 +3318,48 @@ const PreviewVideoShoot = () => {
           
               
               {activeEditorTool === 'transitions' && (
-                <TransitionOverlay
-                  videoDuration={getFullDuration()}
-                  currentTime={currentTime}
-                  onAddTransition={handleTransitionAdd}
-                  onRemoveTransition={handleTransitionRemove}
-                  existingTransitions={transitionEffects}
-                />
+                <>
+                  {activeSplitForTransition && (
+                    <View style={styles.splitTransitionHeader}>
+                      <Text style={styles.splitTransitionText}>
+                        Adding transition to split at {activeSplitForTransition.time.toFixed(1)}s
+                      </Text>
+                      <TouchableOpacity 
+                        onPress={() => {
+                          setActiveSplitForTransition(null);
+                          setActiveEditorTool(null);
+                          setShowVideoEditor(false);
+                        }}
+                        style={styles.cancelSplitTransition}
+                      >
+                        <MaterialIcons name="close" size={moderateScale(20)} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <TransitionOverlay
+                    videoDuration={getFullDuration()}
+                    currentTime={activeSplitForTransition?.time ?? currentTime}
+                    onAddTransition={handleTransitionAdd}
+                    onRemoveTransition={handleTransitionRemove}
+                    existingTransitions={transitionEffects}
+                  />
+                </>
               )}
             </View>
           </View>
         </View>
       </Modal>
-    </GestureHandlerRootView>
+      </GestureHandlerRootView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#1a1a1a",
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
+  },
   container: {
     flex: 1,
     backgroundColor: "#1a1a1a",
@@ -2736,6 +3379,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     margin: 0,
   },
+  splitTransitionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    borderRadius: moderateScale(8),
+    padding: moderateScale(12),
+    margin: moderateScale(10),
+    marginBottom: 0,
+  },
+  splitTransitionText: {
+    color: '#FFD700',
+    fontSize: moderateScale(14),
+    fontWeight: '600',
+    flex: 1,
+  },
+  cancelSplitTransition: {
+    padding: moderateScale(4),
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: moderateScale(15),
+  },
   transitionOverlay: {
     position: 'absolute',
     top: 0,
@@ -2745,16 +3411,18 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(8),
   },
   header: {
-    paddingTop: moderateScale(50),
-    paddingBottom: moderateScale(20),
+    paddingTop: moderateScale(15),
+    paddingBottom: moderateScale(15),
     alignItems: "center",
     position: "relative",
+    minHeight: moderateScale(60),
   },
   backButton: {
     position: "absolute",
     left: moderateScale(20),
-    top: moderateScale(58),
+    top: moderateScale(18),
     zIndex: 1,
+    padding: moderateScale(8),
   },
   headerLine: {
     width: SCREEN_WIDTH * 0.8,
@@ -2771,7 +3439,7 @@ const styles = StyleSheet.create({
   headerActions: {
     position: "absolute",
     right: moderateScale(20),
-    top: moderateScale(50),
+    top: moderateScale(18),
     flexDirection: "row",
     alignItems: "center",
     gap: moderateScale(15),
@@ -2800,10 +3468,78 @@ const styles = StyleSheet.create({
     paddingHorizontal: moderateScale(10),
   },
   video: {
-    width: SCREEN_WIDTH * 0.9 + 9,
-    height: moderateScale(440),
+    width: SCREEN_WIDTH * 0.95,
+    height: Math.min(SCREEN_HEIGHT * 0.5, moderateScale(440)), // Responsive height
+    maxHeight: moderateScale(500),
     borderRadius: moderateScale(10),
     backgroundColor: "black",
+    alignSelf: 'center',
+  },
+  videoTapArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: moderateScale(65), // Leave space for custom controls
+    zIndex: 3, // Below overlays but above video
+  },
+  customControlsContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: moderateScale(15),
+    paddingVertical: moderateScale(12),
+    zIndex: 10,
+  },
+  customTimeText: {
+    color: '#FFFFFF',
+    fontSize: moderateScale(14),
+    fontWeight: '600',
+    fontFamily: 'monospace',
+    marginBottom: moderateScale(8),
+  },
+  customSeekbarContainer: {
+    width: '100%',
+    height: moderateScale(30),
+    justifyContent: 'center',
+  },
+  customSeekbarTrack: {
+    width: '100%',
+    height: moderateScale(4),
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: moderateScale(2),
+    overflow: 'hidden',
+  },
+  customSeekbarProgress: {
+    height: '100%',
+    backgroundColor: '#259B9A',
+    borderRadius: moderateScale(2),
+  },
+  customSeekbarThumb: {
+    position: 'absolute',
+    width: moderateScale(12),
+    height: moderateScale(12),
+    borderRadius: moderateScale(6),
+    backgroundColor: '#FFFFFF',
+    top: '50%',
+    marginTop: -moderateScale(6),
+    marginLeft: -moderateScale(6),
+    borderWidth: 2,
+    borderColor: '#259B9A',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  customSeekbarTouchArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   playPauseOverlay: {
     position: 'absolute',

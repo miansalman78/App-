@@ -22,9 +22,9 @@ const BottomToolbar: React.FC<BottomToolbarProps> = ({
 
   const tools = [
     {
-      id: 'edit',
-      name: 'Edit',
-      icon: 'content-cut',
+      id: 'split',
+      name: 'Split',
+      icon: 'call-split',
     },
     {
       id: 'audio',
