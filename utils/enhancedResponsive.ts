@@ -7,14 +7,27 @@ export const getDeviceType = () => {
   const aspectRatio = SCREEN_WIDTH / SCREEN_HEIGHT;
   const isTablet = SCREEN_WIDTH >= 768 || SCREEN_HEIGHT >= 1024;
   const isPhone = !isTablet && (SCREEN_WIDTH < 768 || SCREEN_HEIGHT < 1024);
+  
+  // Surface Duo detection: dual-screen foldable device
+  // Surface Duo: 360x2700 (folded portrait), 540x2700 (folded landscape), 1800x2700 (unfolded)
+  const isSurfaceDuo = Platform.OS === 'android' && (
+    (SCREEN_WIDTH === 540 && SCREEN_HEIGHT === 2700) || // Folded landscape
+    (SCREEN_WIDTH === 360 && SCREEN_HEIGHT === 2700) || // Folded portrait
+    (SCREEN_WIDTH === 1800 && SCREEN_HEIGHT === 2700) || // Unfolded
+    (SCREEN_HEIGHT === 540 && SCREEN_WIDTH === 2700) || // Folded landscape rotated
+    (SCREEN_HEIGHT === 360 && SCREEN_WIDTH === 2700) || // Folded portrait rotated
+    (SCREEN_HEIGHT === 1800 && SCREEN_WIDTH === 2700) // Unfolded rotated
+  );
+  
   const isSurface = Platform.OS === 'windows' && isTablet;
   const isIPad = Platform.OS === 'ios' && isTablet;
-  const isAndroidTablet = Platform.OS === 'android' && isTablet;
+  const isAndroidTablet = Platform.OS === 'android' && isTablet && !isSurfaceDuo;
   
   return {
     isPhone,
-    isTablet,
+    isTablet: isTablet || isSurfaceDuo, // Surface Duo treated as tablet
     isSurface,
+    isSurfaceDuo,
     isIPad,
     isAndroidTablet,
     isIOS: Platform.OS === 'ios',
@@ -62,6 +75,15 @@ export const getResponsiveScale = (size: number, deviceType?: string) => {
   // Device-specific adjustments
   if (device.isIPad) {
     scaleFactor *= 1.2; // iPad text and elements should be larger
+  } else if (device.isSurfaceDuo) {
+    // Surface Duo: Adjust for dual-screen or folded states
+    if (SCREEN_WIDTH <= 540) {
+      // Folded state - single screen
+      scaleFactor *= 0.95; // Slightly smaller when folded
+    } else {
+      // Unfolded state - dual screen
+      scaleFactor *= 1.15; // Larger when unfolded
+    }
   } else if (device.isSurface) {
     scaleFactor *= 1.1; // Surface devices
   } else if (device.isAndroidTablet) {
@@ -108,6 +130,13 @@ export const getResponsiveFontSize = (size: number, options?: {
   // Device-specific adjustments
   if (device.isIPad) {
     scaledSize *= 1.1; // iPad needs larger fonts
+  } else if (device.isSurfaceDuo) {
+    // Surface Duo font scaling
+    if (SCREEN_WIDTH <= 540) {
+      scaledSize *= 0.98; // Slightly smaller fonts when folded
+    } else {
+      scaledSize *= 1.08; // Larger fonts when unfolded
+    }
   } else if (device.isSurface) {
     scaledSize *= 1.05; // Surface devices
   }
@@ -127,6 +156,13 @@ export const getResponsiveSpacing = (size: number) => {
   
   if (device.isIPad) {
     spacing *= 1.2; // iPad specific
+  } else if (device.isSurfaceDuo) {
+    // Surface Duo spacing adjustments
+    if (SCREEN_WIDTH <= 540) {
+      spacing *= 0.9; // Tighter spacing when folded (single screen)
+    } else {
+      spacing *= 1.15; // More spacing when unfolded (dual screen)
+    }
   } else if (device.isSurface) {
     spacing *= 1.1; // Surface specific
   }
@@ -190,6 +226,15 @@ export const getResponsiveButtonSize = () => {
     if (device.isIPad) {
       height = 60;
       minWidth = 180;
+    } else if (device.isSurfaceDuo) {
+      // Surface Duo button sizes
+      if (SCREEN_WIDTH <= 540) {
+        height = 52; // Smaller when folded
+        minWidth = 140;
+      } else {
+        height = 60; // Larger when unfolded
+        minWidth = 180;
+      }
     } else if (device.isSurface) {
       height = 58;
       minWidth = 170;

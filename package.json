@@ -4,10 +4,14 @@
   "version": "1.1.0",
   "scripts": {
     "start": "expo start",
+    "start:tunnel": "expo start --tunnel",
+    "start:qr": "expo start --tunnel --clear",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "publish": "eas update --branch preview --message \"Latest update\"",
+    "publish:production": "eas update --branch production --message \"Production update\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.911.0",

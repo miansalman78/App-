@@ -32,7 +32,9 @@ export default function RootLayout() {
            <Stack.Screen
             name="screens/PreviewVideoShoot"
             options={{
-              headerShown: false
+              headerShown: false,
+              presentation: 'card',
+              animation: 'slide_from_right',
             }}
           />
           <Stack.Screen name="+not-found" />

@@ -53,8 +53,8 @@ const styles = StyleSheet.create({
   },
   controlsContainer: {
     position: "absolute",
-    top: moderateScale(10),
-    right: moderateScale(10),
+    top: getResponsiveSpacing(device.isTablet ? 15 : 10),
+    right: getResponsiveSpacing(device.isTablet ? 15 : 10),
     alignItems: "flex-end",
     zIndex: 10,
   },
@@ -190,13 +190,13 @@ cameraButton: {
   },
   bottomControls: {
     position: 'absolute',
-    bottom: moderateScale(30),
+    bottom: getResponsiveSpacing(device.isTablet ? 40 : 30),
     left: 0,
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: moderateScale(40),
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 50 : 40),
     zIndex: 100,
   },
   recordButton: {

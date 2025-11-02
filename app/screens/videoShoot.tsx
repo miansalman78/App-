@@ -18,8 +18,9 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from "react-native"
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useScript } from "../../contexts/ScriptContext"
 import styles from "./videoShootStyles"
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window")
@@ -77,6 +78,7 @@ const VideoShoot = () => {
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
   const isFocused = useIsFocused()
+  const insets = useSafeAreaInsets() // iOS/Android safe area insets
   const [cameraAspectRatio, setCameraAspectRatio] = useState<
     "portrait" | "landscape"
   >("portrait")
@@ -534,7 +536,7 @@ const VideoShoot = () => {
   console.log("Render - permissionError:", permissionError)
 
   return (
-    <View style={styles.fullScreenContainer}>
+    <SafeAreaView style={styles.fullScreenContainer} edges={['top', 'bottom']}>
       {permissionLoading ? (
         <View style={styles.loadingContainer}>
           <Text style={[styles.permissionText, { marginBottom: 20 }]}>Checking permissions...</Text>
@@ -1140,7 +1142,7 @@ const VideoShoot = () => {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   )
 }
 

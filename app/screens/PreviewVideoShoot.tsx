@@ -9,14 +9,24 @@ import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import LottieView from "lottie-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View, SafeAreaView, Platform, StatusBar } from "react-native";
+import { Alert, Dimensions, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import ImageItem from "../../components/ImageItem";
 import StickerItem from "../../components/StickerItem";
 import TextItem from "../../components/TextItem";
 import VolumeControl from "../../components/VolumeControl";
 import { AppColors } from "../../constants/Colors";
 import { useVolume } from '../../contexts/VolumeContext';
+import {
+  getDeviceType,
+  getResponsiveBorderRadius,
+  getResponsiveFontSize,
+  getResponsiveLayout,
+  getResponsivePadding,
+  getResponsiveScale,
+  getResponsiveSpacing
+} from "../../utils/enhancedResponsive";
 
 // VideoEditor Components
 import VideoEditingTools from "../../components/VideoEditor/VideoEditingTools";
@@ -44,20 +54,45 @@ const getScreenDimensions = () => {
 };
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = getScreenDimensions();
+const device = getDeviceType();
+const layout = getResponsiveLayout();
 
 const PreviewVideoShoot = () => {
   const router = useRouter();
   const route = useRoute();
-  const { videoUri: initialVideoUri } = (route.params || {}) as {
+  const insets = useSafeAreaInsets(); // iOS safe area insets
+  const params = route.params as {
     videoUri?: string;
     orientation?: "portrait" | "landscape";
-  };
+  } | undefined;
+  const { videoUri: initialVideoUri } = params || {};
   
   // Get global volume context
   const { getActualVolume, isMuted, volume, audioTrack, setAudioTrack, getActualAudioVolume } = useVolume();
+  
+  // iOS-specific device detection
+  const isIOS = Platform.OS === 'ios';
+  const isIOSDevice = device.isIOS || isIOS;
 
   // Add videoUri state to manage the current video URI
   const [videoUri, setVideoUri] = useState<string | undefined>(initialVideoUri);
+  
+  // Effect to update videoUri when route params change (for iOS navigation)
+  useEffect(() => {
+    const routeParams = route.params as {
+      videoUri?: string;
+      orientation?: "portrait" | "landscape";
+    } | undefined;
+    
+    if (routeParams?.videoUri) {
+      const newVideoUri = routeParams.videoUri;
+      if (newVideoUri !== videoUri) {
+        console.log('✅ Video URI updated from route params:', newVideoUri);
+        setVideoUri(newVideoUri);
+        setIsLoadingVideo(true); // Show loading when new video loads
+      }
+    }
+  }, [route.params]);
   const [isUploaded, setIsUploaded] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
@@ -376,10 +411,25 @@ const PreviewVideoShoot = () => {
     return Math.max(0, Math.min(getFullDuration(), virtual));
   };
 
-  const player = useVideoPlayer(videoUri || "", (player) => {
-    player.loop = false;
-    // Don't auto-play, let user control it
+  // Initialize player only with valid videoUri (fixes iOS white screen issue)
+  const player = useVideoPlayer(videoUri ? videoUri : { uri: "" }, (player) => {
+    if (videoUri) {
+      player.loop = false;
+      // Don't auto-play, let user control it
+    }
   });
+  
+  // Update player source when videoUri changes (critical for iOS)
+  useEffect(() => {
+    if (videoUri && player) {
+      try {
+        player.replace(videoUri);
+        console.log('✅ Player source updated with videoUri:', videoUri);
+      } catch (error) {
+        console.error('Error updating player source:', error);
+      }
+    }
+  }, [videoUri, player]);
 
   useEvent(player, 'statusChange', {
     status: player.status,
@@ -950,15 +1000,19 @@ const PreviewVideoShoot = () => {
   };
 
   const processVideoData = async () => {
-    if (!videoUri) return;
+    if (!videoUri) {
+      setIsLoadingVideo(false);
+      return;
+    }
     
     setIsLoadingVideo(true);
     try {
       // Extract video metadata
-      console.log('Processing video data for URI:', videoUri);
+      console.log('🎬 Processing video data for URI:', videoUri);
       const metadata = await VideoProcessor.getVideoMetadata(videoUri);
-      console.log('Video metadata loaded:', metadata);
+      console.log('✅ Video metadata loaded:', metadata);
       setVideoMetadata(metadata);
+      setIsLoadingVideo(false); // Video loaded successfully
       // Initialize segments to full video on load
       setTrimStartSec(0);
       setTrimEndSec(metadata.duration || 0);
@@ -2518,21 +2572,31 @@ const PreviewVideoShoot = () => {
     }
   };
 
-  if (!videoUri) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.noVideoText}>No video to preview.</Text>
-      </View>
-    );
-  }
-
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        {!isUploaded && !(showDiscardModal && isDiscardConfirmed) ? (
-          <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
+        {!videoUri ? (
+          <View style={styles.centered}>
+            <Text style={styles.noVideoText}>No video to preview.</Text>
+            <TouchableOpacity 
+              style={styles.backButtonHome} 
+              onPress={() => router.back()}
+            >
+              <Text style={styles.backButtonHomeText}>Go Back</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+          {!isUploaded && !(showDiscardModal && isDiscardConfirmed) ? (
+            <View style={styles.container}>
+            {/* Header */}
+          <View style={[
+            styles.header,
+            // iOS-specific safe area padding for header
+            Platform.OS === 'ios' && {
+              paddingTop: getResponsiveSpacing(device.isTablet ? 20 : 15) + (insets.top || 0),
+            }
+          ]}>
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
               <MaterialIcons name="arrow-back" size={24} color="white" />
             </TouchableOpacity>
@@ -2558,21 +2622,51 @@ const PreviewVideoShoot = () => {
 
           <ScrollView 
             style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[
+              styles.scrollContent,
+              // iOS-specific safe area padding
+              Platform.OS === 'ios' && {
+                paddingBottom: getResponsiveSpacing(device.isTablet ? 40 : 30) + (insets.bottom || 0),
+              }
+            ]}
             showsVerticalScrollIndicator={false}
           >
             {/* Video Preview */}
             <View style={styles.videoContainer}>
-              <VideoView
-                style={styles.video}
-                player={player}
-                allowsFullscreen
-                allowsPictureInPicture
-                nativeControls={false}
-              />
+              {videoUri && player ? (
+                <VideoView
+                  style={styles.video}
+                  player={player}
+                  allowsFullscreen
+                  allowsPictureInPicture
+                  nativeControls={false}
+                />
+              ) : (
+                <View style={styles.videoPlaceholder}>
+                  {isLoadingVideo ? (
+                    <>
+                      <MaterialIcons name="video-library" size={48} color="#259B9A" />
+                      <Text style={styles.loadingVideoText}>Loading video...</Text>
+                    </>
+                  ) : (
+                    <>
+                      <MaterialIcons name="videocam-off" size={48} color="rgba(255, 255, 255, 0.5)" />
+                      <Text style={styles.noVideoText}>No video available</Text>
+                    </>
+                  )}
+                </View>
+              )}
               
-              {/* Custom Controls Container */}
-              <View style={styles.customControlsContainer}>
+              {/* Custom Controls Container - Only show when video is loaded */}
+              {videoUri && !isLoadingVideo && (
+              <View style={[
+                styles.customControlsContainer,
+                // iOS-specific safe area positioning
+                Platform.OS === 'ios' && {
+                  bottom: insets.bottom || 0,
+                  paddingBottom: getResponsiveSpacing(device.isTablet ? 16 : 12) + (insets.bottom || 0),
+                }
+              ]}>
                 {/* Time Display */}
                 <Text style={styles.customTimeText}>
                   {formatTimeDisplay((() => {
@@ -2672,8 +2766,10 @@ const PreviewVideoShoot = () => {
                   />
                 </View>
               </View>
+              )}
               
-              {/* Play/Pause Button Overlay */}
+              {/* Play/Pause Button Overlay - Only show when video is loaded */}
+              {videoUri && !isLoadingVideo && (
               <TouchableOpacity 
                 style={styles.videoTapArea}
                 activeOpacity={1}
@@ -2693,14 +2789,15 @@ const PreviewVideoShoot = () => {
                   </View>
                 )}
               </TouchableOpacity>
+              )}
                 
-                {/* Transition Effect Overlay */}
-                {activeTransition && (
+                {/* Transition Effect Overlay - Only show when video is loaded */}
+                {videoUri && !isLoadingVideo && activeTransition && (
                   <View style={[styles.transitionOverlay, getTransitionStyle(activeTransition)]} />
                 )}
               
               {/* Text Overlays - Only show when currentTime is within range */}
-              {textOverlays
+              {videoUri && !isLoadingVideo && textOverlays
                 .filter(overlay => currentTime >= overlay.startTime && currentTime <= overlay.endTime)
                 .map((overlay) => (
                 <TextItem
@@ -2716,7 +2813,7 @@ const PreviewVideoShoot = () => {
               ))}
 
               {/* Sticker Overlays - Only show when currentTime is within range */}
-              {stickerOverlays
+              {videoUri && !isLoadingVideo && stickerOverlays
                 .filter(sticker => currentTime >= sticker.startTime && currentTime <= sticker.endTime)
                 .map((sticker) => (
                   <StickerItem
@@ -2732,7 +2829,7 @@ const PreviewVideoShoot = () => {
                 ))}
 
               {/* Image Overlays - Only show when currentTime is within range */}
-              {imageOverlays
+              {videoUri && !isLoadingVideo && imageOverlays
                 .filter(image => currentTime >= image.startTime && currentTime <= image.endTime)
                 .map((image, index) => {
                 // Convert size to width/height for ImageItem component
@@ -2989,6 +3086,8 @@ const PreviewVideoShoot = () => {
           />
         </View>
       ) : null}
+          </>
+        )}
       <Modal
         animationType="fade"
         transparent={true}
@@ -3186,7 +3285,7 @@ const PreviewVideoShoot = () => {
             </View>
             
             <View style={styles.toasterBody}>
-              {activeEditorTool === 'edit' && (
+              {activeEditorTool === 'edit' && videoUri && (
                 <VideoEditingTools
                   videoUri={videoUri}
                   videoDuration={(videoMetadata?.duration || player?.duration || 0)}
@@ -3358,11 +3457,12 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#1a1a1a",
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
   },
   container: {
     flex: 1,
     backgroundColor: "#1a1a1a",
+    width: '100%',
+    height: '100%',
   },
   audioEditorContainer: {
     flex: 1,
@@ -3411,44 +3511,46 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(8),
   },
   header: {
-    paddingTop: moderateScale(15),
-    paddingBottom: moderateScale(15),
+    paddingTop: getResponsiveSpacing(device.isTablet ? 20 : 15),
+    paddingBottom: getResponsiveSpacing(device.isTablet ? 20 : 15),
     alignItems: "center",
     position: "relative",
-    minHeight: moderateScale(60),
+    minHeight: device.isTablet ? getResponsiveScale(70) : getResponsiveScale(60),
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 24 : 16),
+    // iOS safe area padding will be added dynamically
   },
   backButton: {
     position: "absolute",
-    left: moderateScale(20),
-    top: moderateScale(18),
+    left: getResponsivePadding(device.isTablet ? 24 : 20),
+    top: device.isTablet ? getResponsiveSpacing(20) : getResponsiveSpacing(18),
     zIndex: 1,
-    padding: moderateScale(8),
+    padding: getResponsivePadding(device.isTablet ? 12 : 8),
   },
   headerLine: {
-    width: SCREEN_WIDTH * 0.8,
+    width: device.isTablet ? SCREEN_WIDTH * 0.75 : SCREEN_WIDTH * 0.8,
     height: 1,
     backgroundColor: '#259B9A',
-    marginTop: moderateScale(15),
+    marginTop: getResponsiveSpacing(device.isTablet ? 18 : 15),
   },
   headerTitle: {
-    fontSize: moderateScale(24),
+    fontSize: getResponsiveFontSize(device.isTablet ? 28 : 24, { minSize: 20, maxSize: 32 }),
     fontWeight: "bold",
     color: AppColors.white,
     textAlign: "center",
   },
   headerActions: {
     position: "absolute",
-    right: moderateScale(20),
-    top: moderateScale(18),
+    right: getResponsivePadding(device.isTablet ? 24 : 20),
+    top: device.isTablet ? getResponsiveSpacing(20) : getResponsiveSpacing(18),
     flexDirection: "row",
     alignItems: "center",
-    gap: moderateScale(15),
+    gap: getResponsiveSpacing(device.isTablet ? 18 : 15),
     zIndex: 1,
   },
   headerIcon: {
-    width: moderateScale(40),
-    height: moderateScale(40),
-    borderRadius: moderateScale(20),
+    width: getResponsiveScale(device.isTablet ? 44 : 40),
+    height: getResponsiveScale(device.isTablet ? 44 : 40),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 22 : 20),
     backgroundColor: "rgba(37, 155, 154, 0.2)",
     alignItems: "center",
     justifyContent: "center",
@@ -3459,74 +3561,108 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: moderateScale(30),
+    paddingBottom: getResponsiveSpacing(device.isTablet ? 40 : 30),
+    // iOS safe area padding added dynamically in component
   },
   videoContainer: {
     alignItems: "center",
-    marginTop: moderateScale(20),
-    marginBottom: moderateScale(30),
-    paddingHorizontal: moderateScale(10),
+    marginTop: getResponsiveSpacing(device.isTablet ? 30 : 20),
+    marginBottom: getResponsiveSpacing(device.isTablet ? 40 : 30),
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 16 : 10),
+    // iOS-specific spacing added dynamically if needed
   },
   video: {
-    width: SCREEN_WIDTH * 0.95,
-    height: Math.min(SCREEN_HEIGHT * 0.5, moderateScale(440)), // Responsive height
-    maxHeight: moderateScale(500),
-    borderRadius: moderateScale(10),
+    width: device.isTablet 
+      ? (device.isSurfaceDuo && SCREEN_WIDTH <= 540 
+          ? SCREEN_WIDTH * 0.92  // Surface Duo folded: slightly smaller
+          : Math.min(SCREEN_WIDTH * 0.85, 800))  // Normal tablet or unfolded
+      : SCREEN_WIDTH * 0.95,
+    height: device.isTablet 
+      ? (device.isSurfaceDuo && SCREEN_WIDTH <= 540
+          ? Math.min(SCREEN_HEIGHT * 0.48, getResponsiveScale(420))  // Folded: smaller
+          : Math.min(SCREEN_HEIGHT * 0.55, getResponsiveScale(500)))  // Unfolded: normal
+      : Math.min(SCREEN_HEIGHT * 0.5, getResponsiveScale(440)),
+    maxHeight: device.isTablet 
+      ? (device.isSurfaceDuo && SCREEN_WIDTH <= 540
+          ? getResponsiveScale(480)  // Folded: smaller max
+          : getResponsiveScale(550))  // Unfolded: normal max
+      : getResponsiveScale(500),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 15 : 10),
     backgroundColor: "black",
     alignSelf: 'center',
+  },
+  videoPlaceholder: {
+    width: device.isTablet ? Math.min(SCREEN_WIDTH * 0.85, 800) : SCREEN_WIDTH * 0.95,
+    height: device.isTablet 
+      ? Math.min(SCREEN_HEIGHT * 0.55, getResponsiveScale(500))
+      : Math.min(SCREEN_HEIGHT * 0.5, getResponsiveScale(440)),
+    maxHeight: device.isTablet ? getResponsiveScale(550) : getResponsiveScale(500),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 15 : 10),
+    backgroundColor: "#000",
+    alignSelf: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingVideoText: {
+    color: "#259B9A",
+    fontSize: getResponsiveFontSize(device.isTablet ? 18 : 16, { minSize: 14, maxSize: 20 }),
+    marginTop: getResponsiveSpacing(device.isTablet ? 20 : 15),
+    textAlign: 'center',
+    fontWeight: '600',
   },
   videoTapArea: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: moderateScale(65), // Leave space for custom controls
+    bottom: getResponsiveScale(device.isTablet ? 75 : 65), // Leave space for custom controls
     zIndex: 3, // Below overlays but above video
   },
   customControlsContainer: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 0, // iOS safe area bottom added dynamically
     left: 0,
     right: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    paddingHorizontal: moderateScale(15),
-    paddingVertical: moderateScale(12),
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 20 : 15),
+    paddingVertical: getResponsiveSpacing(device.isTablet ? 16 : 12),
+    // iOS safe area padding added dynamically in component
     zIndex: 10,
   },
   customTimeText: {
     color: '#FFFFFF',
-    fontSize: moderateScale(14),
+    fontSize: getResponsiveFontSize(device.isTablet ? 16 : 14, { minSize: 12, maxSize: 18 }),
     fontWeight: '600',
     fontFamily: 'monospace',
-    marginBottom: moderateScale(8),
+    marginBottom: getResponsiveSpacing(device.isTablet ? 10 : 8),
   },
   customSeekbarContainer: {
     width: '100%',
-    height: moderateScale(30),
+    height: getResponsiveScale(device.isTablet ? 35 : 30),
     justifyContent: 'center',
   },
   customSeekbarTrack: {
     width: '100%',
-    height: moderateScale(4),
+    height: getResponsiveScale(device.isTablet ? 5 : 4),
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: moderateScale(2),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 3 : 2),
     overflow: 'hidden',
   },
   customSeekbarProgress: {
     height: '100%',
     backgroundColor: '#259B9A',
-    borderRadius: moderateScale(2),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 3 : 2),
   },
   customSeekbarThumb: {
     position: 'absolute',
-    width: moderateScale(12),
-    height: moderateScale(12),
-    borderRadius: moderateScale(6),
+    width: getResponsiveScale(device.isTablet ? 14 : 12),
+    height: getResponsiveScale(device.isTablet ? 14 : 12),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 7 : 6),
     backgroundColor: '#FFFFFF',
     top: '50%',
-    marginTop: -moderateScale(6),
-    marginLeft: -moderateScale(6),
-    borderWidth: 2,
+    marginTop: device.isTablet ? -getResponsiveScale(7) : -getResponsiveScale(6),
+    marginLeft: device.isTablet ? -getResponsiveScale(7) : -getResponsiveScale(6),
+    borderWidth: device.isTablet ? 2.5 : 2,
     borderColor: '#259B9A',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -3558,55 +3694,56 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: moderateScale(30),
+    marginBottom: getResponsiveSpacing(device.isTablet ? 40 : 30),
   },
   playButton: {
-    width: moderateScale(50),
-    height: moderateScale(50),
-    borderRadius: moderateScale(25),
+    width: getResponsiveScale(device.isTablet ? 56 : 50),
+    height: getResponsiveScale(device.isTablet ? 56 : 50),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 28 : 25),
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: moderateScale(15),
+    marginRight: getResponsiveSpacing(device.isTablet ? 18 : 15),
   },
   timeText: {
     color: "white",
-    fontSize: moderateScale(16),
+    fontSize: getResponsiveFontSize(device.isTablet ? 18 : 16, { minSize: 14, maxSize: 20 }),
   },
   saveButton: {
     backgroundColor: "#259B9A",
-    marginHorizontal: moderateScale(20),
-    paddingVertical: moderateScale(18),
-    borderRadius: moderateScale(12),
+    marginHorizontal: getResponsivePadding(device.isTablet ? 24 : 20),
+    paddingVertical: getResponsiveSpacing(device.isTablet ? 20 : 18),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 14 : 12),
     alignItems: "center",
-    marginBottom: moderateScale(30),
+    marginBottom: getResponsiveSpacing(device.isTablet ? 40 : 30),
+    // iOS safe area padding added dynamically in component
   },
   saveButtonText: {
     color: "white",
-    fontSize: moderateScale(16),
+    fontSize: getResponsiveFontSize(device.isTablet ? 18 : 16, { minSize: 14, maxSize: 20 }),
     fontWeight: "600",
   },
   editSection: {
-    paddingHorizontal: moderateScale(20),
-    marginTop: moderateScale(20), // Move buttons further down
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 24 : 20),
+    marginTop: getResponsiveSpacing(device.isTablet ? 30 : 20),
   },
   editButtonsContainer: {
-    paddingHorizontal: moderateScale(8),
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 12 : 8),
   },
   editButton: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: moderateScale(12),
-    paddingHorizontal: moderateScale(16),
-    marginHorizontal: moderateScale(8),
+    paddingVertical: getResponsiveSpacing(device.isTablet ? 14 : 12),
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 20 : 16),
+    marginHorizontal: getResponsiveSpacing(device.isTablet ? 12 : 8),
     backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: moderateScale(8),
-    minWidth: moderateScale(62), // Increase width by 2px (from 60 to 62)
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 10 : 8),
+    minWidth: getResponsiveScale(device.isTablet ? 70 : 62),
   },
   editButtonText: {
     color: "white",
-    fontSize: moderateScale(12),
-    marginTop: moderateScale(4),
+    fontSize: getResponsiveFontSize(device.isTablet ? 14 : 12, { minSize: 10, maxSize: 16 }),
+    marginTop: getResponsiveSpacing(device.isTablet ? 6 : 4),
     textAlign: "center",
   },
   videoView: {
@@ -3635,11 +3772,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#000",
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 24 : 20),
   },
   noVideoText: {
     color: "#fff",
-    fontSize: 18,
+    fontSize: getResponsiveFontSize(device.isTablet ? 20 : 18, { minSize: 16, maxSize: 24 }),
+    textAlign: "center",
+    marginBottom: getResponsiveSpacing(device.isTablet ? 30 : 20),
+  },
+  backButtonHome: {
+    backgroundColor: "#259B9A",
+    paddingHorizontal: getResponsivePadding(device.isTablet ? 30 : 24),
+    paddingVertical: getResponsiveSpacing(device.isTablet ? 16 : 14),
+    borderRadius: getResponsiveBorderRadius(device.isTablet ? 12 : 10),
+    marginTop: getResponsiveSpacing(device.isTablet ? 20 : 15),
+  },
+  backButtonHomeText: {
+    color: "#fff",
+    fontSize: getResponsiveFontSize(device.isTablet ? 18 : 16, { minSize: 14, maxSize: 20 }),
+    fontWeight: "600",
   },
   lottie: {
     width: 200,

@@ -19,6 +19,13 @@ module.exports = (async () => {
       stream: 'readable-stream',
       buffer: 'buffer',
     },
+    unstable_enablePackageExports: true,
+  };
+  
+  // Add transformer config for better dynamic import handling
+  config.transformer = {
+    ...config.transformer,
+    unstable_allowRequireContext: true,
   };
 
   return config;

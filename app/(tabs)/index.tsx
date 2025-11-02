@@ -14,6 +14,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppColors } from '../../constants/Colors';
 import {
+    getDeviceType,
+    getResponsiveLayout
+} from '../../utils/enhancedResponsive';
+import {
     getResponsiveButtonHeight,
     getResponsiveTabBarHeight,
     getTopSafeArea,
@@ -28,7 +32,36 @@ import {
 
 const HomeScreen = () => {
   const insets = useSafeAreaInsets();
+  const device = getDeviceType();
+  const layout = getResponsiveLayout();
   const contentPaddingBottom = getResponsiveTabBarHeight() + insets.bottom + responsiveSpacing(20);
+  
+  const dynamicStyles = StyleSheet.create({
+    recordingModes: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: responsiveSpacing(device.isTablet ? 40 : 30),
+      gap: responsiveSpacing(device.isTablet ? 20 : 15),
+    },
+    modeButton: {
+      flex: 1,
+      backgroundColor: '#259B9A',
+      borderRadius: responsiveBorderRadius(device.isTablet ? 14 : 12),
+      padding: responsivePadding(device.isTablet ? 24 : 20),
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: device.isTablet ? (device.isIPad ? 110 : 105) : (isSmallScreen ? 80 : isLargeScreen ? 100 : 90),
+      // Platform-specific shadows
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: Platform.OS === 'ios' ? 2 : 4,
+      },
+      shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+      shadowRadius: Platform.OS === 'ios' ? 4 : 8,
+      elevation: Platform.OS === 'android' ? 6 : 0,
+    },
+  });
   
   return (
     <View style={styles.container}>
@@ -60,9 +93,9 @@ const HomeScreen = () => {
         {/* Recording Mode Section */}
         <Text style={styles.sectionTitle}>Select Recording Mode</Text>
 
-        <View style={styles.recordingModes}>
+        <View style={dynamicStyles.recordingModes}>
           <TouchableOpacity
-            style={styles.modeButton}
+            style={dynamicStyles.modeButton}
             onPress={() => {
               router.push({
                 pathname: '/screens/videoShoot',
@@ -75,7 +108,7 @@ const HomeScreen = () => {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.modeButton}
+            style={dynamicStyles.modeButton}
             onPress={() => {
               router.push({
                 pathname: '/screens/videoShoot',
@@ -221,30 +254,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: AppColors.white,
     marginBottom: responsiveSpacing(20),
-  },
-  recordingModes: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: responsiveSpacing(30),
-    gap: responsiveSpacing(15),
-  },
-  modeButton: {
-    flex: 1,
-    backgroundColor: '#259B9A',
-    borderRadius: responsiveBorderRadius(12),
-    padding: responsivePadding(20),
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: isSmallScreen ? 80 : isLargeScreen ? 100 : 90,
-    // Platform-specific shadows
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: Platform.OS === 'ios' ? 2 : 4,
-    },
-    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
-    shadowRadius: Platform.OS === 'ios' ? 4 : 8,
-    elevation: Platform.OS === 'android' ? 6 : 0,
   },
   modeButtonText: {
     color: AppColors.white,

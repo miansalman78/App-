@@ -1,18 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-  Switch,
-} from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter, Stack } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Stack, useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AWSS3Service from '../../utils/awsS3Service';
 
 interface AWSCredentials {
@@ -26,6 +28,7 @@ interface AWSCredentials {
 
 export default function AWSSettings() {
   const router = useRouter();
+  const insets = useSafeAreaInsets(); // iOS/Android safe area insets
   const [credentials, setCredentials] = useState<AWSCredentials>({
     accessKeyId: '',
     secretAccessKey: '',
@@ -122,8 +125,6 @@ export default function AWSSettings() {
         }
       } else {
         // Test AWS credentials by generating a test presigned URL
-        const AWSS3Service = (await import('../../utils/awsS3Service')).default;
-        
         try {
           await AWSS3Service.generatePresignedUrlWithCredentials(
             'test-video.mp4',
@@ -168,12 +169,30 @@ export default function AWSSettings() {
     }
   };
 
+  // Styles with dynamic safe area
+  const dynamicStyles = StyleSheet.create({
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: 16,
+      paddingTop: Platform.select({
+        ios: 16 + (insets.top || 0),
+        android: 48,
+        default: 48,
+      }),
+      backgroundColor: '#161B1B',
+      borderBottomWidth: 2,
+      borderBottomColor: '#259B9A',
+    },
+  });
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={dynamicStyles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <MaterialIcons name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
@@ -184,7 +203,17 @@ export default function AWSSettings() {
         <View style={{ width: 28 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={{
+          paddingBottom: Platform.select({
+            ios: 20 + (insets.bottom || 0),
+            android: 20,
+            default: 20,
+          }),
+        }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Info Section */}
         <View style={styles.infoBox}>
           <MaterialIcons name="info-outline" size={22} color="#259B9A" />
@@ -381,7 +410,7 @@ export default function AWSSettings() {
           </Text>
         </View>
       </ScrollView>
-    </View>
+      </SafeAreaView>
     </>
   );
 }

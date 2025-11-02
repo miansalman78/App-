@@ -15,6 +15,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppColors } from '../../constants/Colors';
 import { useScript } from '../../contexts/ScriptContext';
 import {
+    getDeviceType,
+    getResponsiveLayout
+} from '../../utils/enhancedResponsive';
+import {
     getResponsiveButtonHeight,
     getResponsiveTabBarHeight,
     getTopSafeArea,
@@ -30,6 +34,28 @@ import {
 const ScriptScreen = () => {
   const { script, setScript, isRAGGenerated, ragMetadata, clearScript } = useScript();
   const insets = useSafeAreaInsets();
+  const device = getDeviceType();
+  const layout = getResponsiveLayout();
+  
+  const dynamicStyles = StyleSheet.create({
+    scriptContainer: {
+      backgroundColor: AppColors.primary,
+      borderRadius: responsiveBorderRadius(device.isTablet ? 14 : 12),
+      padding: responsivePadding(device.isTablet ? 24 : 20),
+      marginBottom: responsiveSpacing(device.isTablet ? 40 : 30),
+      marginTop: responsiveSpacing(device.isTablet ? 30 : 20),
+      minHeight: device.isTablet ? (device.isIPad ? 360 : 340) : (isSmallScreen ? 280 : isLargeScreen ? 320 : 300),
+      // Platform-specific shadows
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: Platform.OS === 'ios' ? 2 : 4,
+      },
+      shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+      shadowRadius: Platform.OS === 'ios' ? 4 : 8,
+      elevation: Platform.OS === 'android' ? 8 : 0,
+    },
+  });
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -104,7 +130,7 @@ const ScriptScreen = () => {
         )}
 
         {/* Script Input Area */}
-        <View style={styles.scriptContainer}>
+        <View style={dynamicStyles.scriptContainer}>
           <TextInput
             style={styles.scriptInput}
             placeholder="Type or paste your script here..."
@@ -205,23 +231,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: responsivePadding(20),
     paddingTop: responsiveSpacing(10),
-  },
-  scriptContainer: {
-    backgroundColor: AppColors.primary,
-    borderRadius: responsiveBorderRadius(12),
-    padding: responsivePadding(20),
-    marginBottom: responsiveSpacing(30),
-    marginTop: responsiveSpacing(20),
-    minHeight: isSmallScreen ? 280 : isLargeScreen ? 320 : 300,
-    // Platform-specific shadows
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: Platform.OS === 'ios' ? 2 : 4,
-    },
-    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
-    shadowRadius: Platform.OS === 'ios' ? 4 : 8,
-    elevation: Platform.OS === 'android' ? 8 : 0,
   },
   scriptInput: {
     color: AppColors.white,

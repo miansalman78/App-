@@ -15,6 +15,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppColors } from '../../constants/Colors';
 import {
+    getDeviceType,
+    getResponsiveLayout
+} from '../../utils/enhancedResponsive';
+import {
     getResponsiveTabBarHeight,
     getTopSafeArea,
     isLargeScreen,
@@ -45,6 +49,37 @@ const MyVideosScreen = () => {
   const [durationFilter, setDurationFilter] = useState<'all' | '1min' | '3min' | 'uploaded'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
   const insets = useSafeAreaInsets();
+  const device = getDeviceType();
+  const layout = getResponsiveLayout();
+  
+  const dynamicStyles = StyleSheet.create({
+    videoCard: {
+      backgroundColor: AppColors.primary,
+      borderRadius: responsiveBorderRadius(device.isTablet ? 14 : 12),
+      padding: responsivePadding(device.isTablet ? 20 : 15),
+      marginBottom: responsiveSpacing(device.isTablet ? 20 : 15),
+      flexDirection: 'row',
+      alignItems: 'center',
+      // Platform-specific shadows
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: Platform.OS === 'ios' ? 2 : 4,
+      },
+      shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+      shadowRadius: Platform.OS === 'ios' ? 4 : 8,
+      elevation: Platform.OS === 'android' ? 6 : 0,
+    },
+    videoThumbnail: {
+      width: device.isTablet ? (device.isIPad ? 100 : 95) : (isSmallScreen ? 70 : isLargeScreen ? 90 : 80),
+      height: device.isTablet ? (device.isIPad ? 75 : 72) : (isSmallScreen ? 52 : isLargeScreen ? 68 : 60),
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      borderRadius: responsiveBorderRadius(device.isTablet ? 10 : 8),
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: responsiveSpacing(device.isTablet ? 20 : 15),
+    },
+  });
 
   useEffect(() => {
     loadSavedVideos();
@@ -180,8 +215,8 @@ const MyVideosScreen = () => {
     };
 
     return (
-      <View style={styles.videoCard}>
-        <View style={styles.videoThumbnail}>
+      <View style={dynamicStyles.videoCard}>
+        <View style={dynamicStyles.videoThumbnail}>
           <MaterialIcons name="play-circle-filled" size={30} color="rgba(255, 255, 255, 0.8)" />
         </View>
         <View style={styles.videoInfo}>
@@ -458,32 +493,6 @@ const styles = StyleSheet.create({
     color: AppColors.white,
     fontSize: responsiveFontSize(14, 16, 12),
     marginLeft: responsiveSpacing(8),
-  },
-  videoCard: {
-    backgroundColor: AppColors.primary,
-    borderRadius: responsiveBorderRadius(12),
-    padding: responsivePadding(15),
-    marginBottom: responsiveSpacing(15),
-    flexDirection: 'row',
-    alignItems: 'center',
-    // Platform-specific shadows
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: Platform.OS === 'ios' ? 2 : 4,
-    },
-    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
-    shadowRadius: Platform.OS === 'ios' ? 4 : 8,
-    elevation: Platform.OS === 'android' ? 6 : 0,
-  },
-  videoThumbnail: {
-    width: isSmallScreen ? 70 : isLargeScreen ? 90 : 80,
-    height: isSmallScreen ? 52 : isLargeScreen ? 68 : 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: responsiveBorderRadius(8),
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: responsiveSpacing(15),
   },
   videoInfo: {
     flex: 1,
