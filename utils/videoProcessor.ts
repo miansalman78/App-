@@ -1,4 +1,4 @@
-import { Audio, Video } from 'expo-av';
+import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { Platform } from 'react-native';
@@ -18,6 +18,39 @@ export interface VideoFrame {
 }
 
 export class VideoProcessor {
+  /**
+   * Helper function to convert seconds to integer milliseconds
+   * This ensures the value is ALWAYS an integer, never a float
+   */
+  private static toIntegerMilliseconds(seconds: number): number {
+    // Step 1: Round the seconds value to remove floating point errors
+    // Use toFixed(3) to limit to millisecond precision, then parse back
+    const roundedSeconds = parseFloat(seconds.toFixed(3));
+    
+    // Step 2: Multiply by 1000 to get milliseconds
+    const milliseconds = roundedSeconds * 1000;
+    
+    // Step 3: Use Math.floor to round down (guarantees integer)
+    // Then convert to string and back to remove any floating point artifacts
+    const integerMillis = Math.floor(milliseconds);
+    
+    // Step 4: Convert to string and parse as integer (removes any decimal representation)
+    const stringMillis = integerMillis.toString();
+    const parsedMillis = parseInt(stringMillis, 10);
+    
+    // Step 5: Final bitwise conversion to force 32-bit integer representation
+    const finalInteger = parsedMillis | 0;
+    
+    // Step 6: Validate it's truly an integer
+    if (!Number.isInteger(finalInteger) || finalInteger < 0) {
+      console.error(`toIntegerMilliseconds failed: ${seconds}s -> ${finalInteger}ms`);
+      // Fallback: use Math.floor directly
+      return Math.floor(milliseconds) | 0;
+    }
+    
+    return finalInteger;
+  }
+
   /**
    * Get video metadata including duration, dimensions, etc.
    */
@@ -62,10 +95,12 @@ export class VideoProcessor {
       // For native platforms, try to use expo-video-thumbnails to get metadata
       try {
         // Generate a thumbnail at time 0 to extract video metadata
+        // Use helper function to ensure integer (even for 0)
+        const timeZero = this.toIntegerMilliseconds(0);
         const { uri, width, height } = await VideoThumbnails.getThumbnailAsync(
           videoUri,
           {
-            time: 0,
+            time: timeZero, // Guaranteed integer milliseconds
             quality: 0.1, // Low quality since we just need metadata
           }
         );
@@ -240,8 +275,14 @@ export class VideoProcessor {
       console.log('Native platform detected - generating actual thumbnails');
       
       for (let i = 0; i < frameCount; i++) {
-        const absoluteTime = startTime + Math.min(i * actualFrameInterval, trimDuration - 0.1);
-        const relativeTime = i * actualFrameInterval; // Time in the trimmed video
+        // Calculate absolute time and ensure it's a clean number
+        // Round to avoid floating point precision issues
+        const rawAbsoluteTime = startTime + Math.min(i * actualFrameInterval, trimDuration - 0.1);
+        // Round to nearest millisecond precision (3 decimal places), then clean up any precision errors
+        const absoluteTime = parseFloat((Math.round(rawAbsoluteTime * 1000) / 1000).toFixed(3));
+        const rawRelativeTime = i * actualFrameInterval;
+        const relativeTime = parseFloat((Math.round(rawRelativeTime * 1000) / 1000).toFixed(3));
+        
         try {
           const thumbnailUri = await VideoProcessor.generateThumbnail(videoUri, absoluteTime);
           frames.push({
@@ -307,16 +348,55 @@ export class VideoProcessor {
       // Ensure requested time is within video duration
       if (timeInSeconds >= metadata.duration) {
         console.warn(`Requested time ${timeInSeconds}s exceeds video duration ${metadata.duration}s - using last valid frame`);
-        timeInSeconds = Math.max(0, metadata.duration - 0.1); // Use frame 0.1s before end
+        timeInSeconds = Math.max(0, metadata.duration - 0.1);
       }
       
       // For native platforms, use expo-video-thumbnails
-      console.log(`Generating thumbnail for ${videoUri} at adjusted time ${timeInSeconds}s`);
+      console.log(`Generating thumbnail for ${videoUri} at time ${timeInSeconds}s`);
       
-      const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
-        time: timeInSeconds * 1000, // Convert to milliseconds
+      // Convert to integer milliseconds using helper function
+      // This helper guarantees the value is ALWAYS an integer
+      let timeParam = this.toIntegerMilliseconds(timeInSeconds);
+      
+      // Final validation before passing to native module
+      if (!Number.isInteger(timeParam) || timeParam < 0 || !Number.isFinite(timeParam)) {
+        console.error(`Invalid timeInMillis after conversion: ${timeParam} (from ${timeInSeconds}s), returning empty`);
+        return '';
+      }
+      
+      // Additional check: ensure no decimal part (should never happen, but defensive)
+      if (timeParam % 1 !== 0) {
+        console.error(`timeParam has decimal part: ${timeParam}, forcing to integer`);
+        // Force to integer by using floor
+        const forcedInteger = Math.floor(timeParam);
+        if (forcedInteger < 0) {
+          return '';
+        }
+        console.log(`Forced integer: ${forcedInteger}`);
+        timeParam = forcedInteger;
+      }
+      
+      console.log(`Generating thumbnail at ${timeParam}ms (from ${timeInSeconds}s, verified integer: ${Number.isInteger(timeParam)})`);
+      
+      // Create options object with guaranteed integer value
+      // Use Object.assign to ensure clean object creation
+      const thumbnailOptions: { time: number; quality: number } = {
+        time: timeParam, // Guaranteed integer milliseconds
         quality: 0.7, // Better performance with slightly lower quality
-      });
+      };
+      
+      // Final verification before native call
+      if (!Number.isInteger(thumbnailOptions.time)) {
+        console.error(`CRITICAL: thumbnailOptions.time is not integer: ${thumbnailOptions.time} (type: ${typeof thumbnailOptions.time})`);
+        // Last resort: force integer conversion
+        thumbnailOptions.time = Math.floor(thumbnailOptions.time) | 0;
+        console.log(`Forced to integer: ${thumbnailOptions.time}`);
+      }
+      
+      // Log the exact value being passed
+      console.log(`Calling getThumbnailAsync with time: ${thumbnailOptions.time} (type: ${typeof thumbnailOptions.time}, isInteger: ${Number.isInteger(thumbnailOptions.time)})`);
+      
+      const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, thumbnailOptions);
       
       console.log(`Thumbnail generated successfully at ${timeInSeconds}s: ${uri}`);
       

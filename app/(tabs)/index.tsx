@@ -6,6 +6,7 @@ import {
     Alert,
     ImageBackground,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -47,17 +48,21 @@ const HomeScreen = () => {
       flex: 1,
       backgroundColor: '#259B9A',
       borderRadius: responsiveBorderRadius(device.isTablet ? 14 : 12),
-      padding: responsivePadding(device.isTablet ? 24 : 20),
+      padding: responsivePadding(device.isTablet ? 24 : (Platform.OS === 'ios' ? 18 : 20)),
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: device.isTablet ? (device.isIPad ? 110 : 105) : (isSmallScreen ? 80 : isLargeScreen ? 100 : 90),
+      minHeight: device.isTablet 
+        ? (device.isIPad ? 110 : 105) 
+        : (Platform.OS === 'ios' 
+          ? (isSmallScreen ? 85 : isLargeScreen ? 95 : 88)
+          : (isSmallScreen ? 80 : isLargeScreen ? 100 : 90)),
       // Platform-specific shadows
       shadowColor: '#000',
       shadowOffset: {
         width: 0,
         height: Platform.OS === 'ios' ? 2 : 4,
       },
-      shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+      shadowOpacity: Platform.OS === 'ios' ? 0.15 : 0.3,
       shadowRadius: Platform.OS === 'ios' ? 4 : 8,
       elevation: Platform.OS === 'android' ? 6 : 0,
     },
@@ -73,7 +78,13 @@ const HomeScreen = () => {
         <View style={styles.headerLine} />
       </View>
 
-      <View style={[styles.content, { paddingBottom: contentPaddingBottom }]}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: contentPaddingBottom }]}
+        showsVerticalScrollIndicator={false}
+        bounces={Platform.OS === 'ios'}
+        alwaysBounceVertical={false}
+      >
         {/* Teleprompter Card with Background Image */}
         <ImageBackground
           source={require('../../assets/images/saa.jpg')}
@@ -103,7 +114,7 @@ const HomeScreen = () => {
               });
             }}
           >
-            <MaterialIcons name="edit" size={24} color={AppColors.white} />
+            <MaterialIcons name="edit" size={Platform.OS === 'ios' ? responsiveFontSize(22, 26, 20) : 24} color={AppColors.white} />
             <Text style={styles.modeButtonText}>1-Minute Pitch</Text>
           </TouchableOpacity>
 
@@ -116,7 +127,7 @@ const HomeScreen = () => {
               });
             }}
           >
-            <MaterialIcons name="slideshow" size={24} color={AppColors.white} />
+            <MaterialIcons name="slideshow" size={Platform.OS === 'ios' ? responsiveFontSize(22, 26, 20) : 24} color={AppColors.white} />
             <Text style={styles.modeButtonText}>3-Minute{"\n"}Presentation</Text>
           </TouchableOpacity>
         </View>
@@ -172,9 +183,7 @@ const HomeScreen = () => {
         >
           <Text style={styles.uploadText}>Upload Video</Text>
         </TouchableOpacity>
-      </View>
-
-
+      </ScrollView>
     </View>
   );
 };
@@ -185,8 +194,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
   },
   header: {
-    paddingTop: getTopSafeArea() + responsiveSpacing(20),
-    paddingBottom: responsiveSpacing(20),
+    paddingTop: getTopSafeArea() + (Platform.OS === 'ios' ? responsiveSpacing(16) : responsiveSpacing(20)),
+    paddingBottom: Platform.OS === 'ios' ? responsiveSpacing(16) : responsiveSpacing(20),
     alignItems: 'center',
   },
   headerContent: {
@@ -207,6 +216,14 @@ const styles = StyleSheet.create({
     color: AppColors.white,
     textAlign: 'center',
   },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: responsivePadding(20),
+    paddingTop: responsiveSpacing(10),
+  },
   content: {
     flex: 1,
     paddingHorizontal: responsivePadding(20),
@@ -214,9 +231,11 @@ const styles = StyleSheet.create({
   },
   teleprompterCard: {
     borderRadius: responsiveBorderRadius(16),
-    padding: responsivePadding(20),
-    marginBottom: responsiveSpacing(30),
-    minHeight: isSmallScreen ? 180 : isLargeScreen ? 220 : 200,
+    padding: responsivePadding(Platform.OS === 'ios' ? 18 : 20),
+    marginBottom: Platform.OS === 'ios' ? responsiveSpacing(24) : responsiveSpacing(30),
+    minHeight: Platform.OS === 'ios' 
+      ? (isSmallScreen ? 185 : isLargeScreen ? 215 : 195)
+      : (isSmallScreen ? 180 : isLargeScreen ? 220 : 200),
     justifyContent: 'center',
     overflow: 'hidden',
     // Platform-specific shadows
@@ -225,7 +244,7 @@ const styles = StyleSheet.create({
       width: 0,
       height: Platform.OS === 'ios' ? 2 : 4,
     },
-    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+    shadowOpacity: Platform.OS === 'ios' ? 0.15 : 0.3,
     shadowRadius: Platform.OS === 'ios' ? 4 : 8,
     elevation: Platform.OS === 'android' ? 8 : 0,
   },
@@ -245,15 +264,17 @@ const styles = StyleSheet.create({
   cardDescription: {
     fontSize: responsiveFontSize(14, 16, 12),
     color: AppColors.white,
-    lineHeight: isSmallScreen ? 18 : 20,
+    lineHeight: Platform.OS === 'ios' 
+      ? (isSmallScreen ? 19 : isLargeScreen ? 22 : 21)
+      : (isSmallScreen ? 18 : 20),
     opacity: 0.9,
-    marginBottom: responsiveSpacing(39),
+    marginBottom: Platform.OS === 'ios' ? responsiveSpacing(35) : responsiveSpacing(39),
   },
   sectionTitle: {
     fontSize: responsiveFontSize(18, 20, 16),
-    fontWeight: '600',
+    fontWeight: Platform.OS === 'ios' ? '600' : '600',
     color: AppColors.white,
-    marginBottom: responsiveSpacing(20),
+    marginBottom: Platform.OS === 'ios' ? responsiveSpacing(18) : responsiveSpacing(20),
   },
   modeButtonText: {
     color: AppColors.white,
@@ -265,17 +286,19 @@ const styles = StyleSheet.create({
   quickStartButton: {
     backgroundColor: '#259B9A',
     borderRadius: responsiveBorderRadius(12),
-    padding: responsivePadding(18),
+    padding: responsivePadding(Platform.OS === 'ios' ? 16 : 18),
     alignItems: 'center',
-    marginBottom: responsiveSpacing(15),
-    minHeight: getResponsiveButtonHeight(),
+    marginBottom: Platform.OS === 'ios' ? responsiveSpacing(12) : responsiveSpacing(15),
+    minHeight: Platform.OS === 'ios' 
+      ? (getResponsiveButtonHeight() + 2)
+      : getResponsiveButtonHeight(),
     // Platform-specific shadows
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: Platform.OS === 'ios' ? 2 : 4,
     },
-    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+    shadowOpacity: Platform.OS === 'ios' ? 0.15 : 0.3,
     shadowRadius: Platform.OS === 'ios' ? 4 : 8,
     elevation: Platform.OS === 'android' ? 6 : 0,
   },
@@ -287,17 +310,19 @@ const styles = StyleSheet.create({
   uploadButton: {
     backgroundColor: '#259B9A',
     borderRadius: responsiveBorderRadius(12),
-    padding: responsivePadding(18),
+    padding: responsivePadding(Platform.OS === 'ios' ? 16 : 18),
     alignItems: 'center',
-    marginBottom: responsiveSpacing(20),
-    minHeight: getResponsiveButtonHeight(),
+    marginBottom: Platform.OS === 'ios' ? responsiveSpacing(16) : responsiveSpacing(20),
+    minHeight: Platform.OS === 'ios' 
+      ? (getResponsiveButtonHeight() + 2)
+      : getResponsiveButtonHeight(),
     // Platform-specific shadows
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: Platform.OS === 'ios' ? 2 : 4,
     },
-    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.3,
+    shadowOpacity: Platform.OS === 'ios' ? 0.15 : 0.3,
     shadowRadius: Platform.OS === 'ios' ? 4 : 8,
     elevation: Platform.OS === 'android' ? 6 : 0,
   },

@@ -37,8 +37,11 @@ import TextOverlay from "../components/VideoEditor/TextOverlay";
 import TransitionOverlay from "../components/VideoEditor/TransitionOverlay";
 
 // Video Processing
-import AudioProcessor, { AudioMixOptions, AudioTrack } from "../../utils/audioProcessor";
+import * as AudioProcessorModule from "../../utils/audioProcessor";
 import VideoProcessor from "../../utils/videoProcessor";
+const AudioProcessor = (AudioProcessorModule as any).default || AudioProcessorModule;
+type AudioMixOptions = any;
+type AudioTrack = any;
 
 // AWS S3 Integration
 import AppConfigManager, { AppConfig } from "../../config/appConfig";
@@ -78,21 +81,40 @@ const PreviewVideoShoot = () => {
   const [videoUri, setVideoUri] = useState<string | undefined>(initialVideoUri);
   
   // Effect to update videoUri when route params change (for iOS navigation)
+  // iOS-specific: Route params may be delayed, so check both immediately and in effect
   useEffect(() => {
     const routeParams = route.params as {
       videoUri?: string;
       orientation?: "portrait" | "landscape";
     } | undefined;
     
-    if (routeParams?.videoUri) {
-      const newVideoUri = routeParams.videoUri;
-      if (newVideoUri !== videoUri) {
-        console.log('✅ Video URI updated from route params:', newVideoUri);
-        setVideoUri(newVideoUri);
-        setIsLoadingVideo(true); // Show loading when new video loads
+    // For iOS: Check params with a small delay to handle navigation timing
+    const checkParams = () => {
+      if (routeParams?.videoUri) {
+        const newVideoUri = routeParams.videoUri;
+        if (newVideoUri !== videoUri) {
+          console.log('✅ Video URI updated from route params:', newVideoUri);
+          setVideoUri(newVideoUri);
+          setIsLoadingVideo(true); // Show loading when new video loads
+        }
+      } else if (isIOS && !videoUri) {
+        // iOS-specific: Retry getting params after a small delay
+        setTimeout(() => {
+          const retryParams = route.params as {
+            videoUri?: string;
+            orientation?: "portrait" | "landscape";
+          } | undefined;
+          if (retryParams?.videoUri && retryParams.videoUri !== videoUri) {
+            console.log('✅ Video URI updated from route params (iOS retry):', retryParams.videoUri);
+            setVideoUri(retryParams.videoUri);
+            setIsLoadingVideo(true);
+          }
+        }, 100);
       }
-    }
-  }, [route.params]);
+    };
+    
+    checkParams();
+  }, [route.params, videoUri, isIOS]);
   const [isUploaded, setIsUploaded] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
@@ -412,19 +434,39 @@ const PreviewVideoShoot = () => {
   };
 
   // Initialize player only with valid videoUri (fixes iOS white screen issue)
-  const player = useVideoPlayer(videoUri ? videoUri : { uri: "" }, (player) => {
-    if (videoUri) {
-      player.loop = false;
-      // Don't auto-play, let user control it
+  // iOS-specific: Use empty source object instead of undefined to prevent initialization errors
+  const player = useVideoPlayer(
+    videoUri && videoUri.trim() !== "" ? videoUri : { uri: "" },
+    (player) => {
+      if (videoUri && videoUri.trim() !== "") {
+        player.loop = false;
+        // Don't auto-play, let user control it
+      }
     }
-  });
+  );
   
   // Update player source when videoUri changes (critical for iOS)
   useEffect(() => {
-    if (videoUri && player) {
+    if (videoUri && videoUri.trim() !== "" && player) {
       try {
-        player.replace(videoUri);
-        console.log('✅ Player source updated with videoUri:', videoUri);
+        // iOS-specific: Ensure player is ready before replacing
+        if (player.status === 'readyToPlay' || player.status === 'idle') {
+          player.replace(videoUri);
+          console.log('✅ Player source updated with videoUri:', videoUri);
+        } else {
+          // Retry after a short delay if player not ready
+          const timeout = setTimeout(() => {
+            if (player && videoUri) {
+              try {
+                player.replace(videoUri);
+                console.log('✅ Player source updated (retry):', videoUri);
+              } catch (err) {
+                console.error('Error updating player source (retry):', err);
+              }
+            }
+          }, 300);
+          return () => clearTimeout(timeout);
+        }
       } catch (error) {
         console.error('Error updating player source:', error);
       }
@@ -1646,7 +1688,7 @@ const PreviewVideoShoot = () => {
             
             try {
               const effectTracks = await AudioProcessor.getAudioTracksByCategory('effects');
-              const selectedEffect = effectTracks.find(track => track.name === data) || effectTracks[0];
+              const selectedEffect = effectTracks.find((track: AudioTrack) => track.name === data) || effectTracks[0];
               
               if (selectedEffect) {
                 
@@ -2572,10 +2614,13 @@ const PreviewVideoShoot = () => {
     }
   };
 
+  // iOS-specific: Show loading if videoUri is not yet available but we're waiting for route params
+  const isWaitingForVideoUri = isIOS && !videoUri && isLoadingVideo;
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        {!videoUri ? (
+        {!videoUri && !isWaitingForVideoUri ? (
           <View style={styles.centered}>
             <Text style={styles.noVideoText}>No video to preview.</Text>
             <TouchableOpacity 
@@ -2598,7 +2643,7 @@ const PreviewVideoShoot = () => {
             }
           ]}>
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-              <MaterialIcons name="arrow-back" size={24} color="white" />
+              <MaterialIcons name="arrow-back" size={Platform.OS === 'ios' ? getResponsiveFontSize(22, { minSize: 20, maxSize: 26 }) : 24} color="white" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Preview</Text>
             
@@ -2607,13 +2652,13 @@ const PreviewVideoShoot = () => {
               {/* AWS Upload Icon */}
               {flaggedForUpload && uploadStatus === 'pending' && (
                 <TouchableOpacity style={styles.headerIcon} onPress={() => setShowUploadToaster(true)}>
-                  <MaterialIcons name="cloud-upload" size={24} color="#259B9A" />
+                  <MaterialIcons name="cloud-upload" size={Platform.OS === 'ios' ? getResponsiveFontSize(22, { minSize: 20, maxSize: 26 }) : 24} color="#259B9A" />
                 </TouchableOpacity>
               )}
               
               {/* Save Video Icon */}
               <TouchableOpacity style={styles.headerIcon} onPress={handleApprove}>
-                <MaterialIcons name="save" size={24} color="#259B9A" />
+                <MaterialIcons name="save" size={Platform.OS === 'ios' ? getResponsiveFontSize(22, { minSize: 20, maxSize: 26 }) : 24} color="#259B9A" />
               </TouchableOpacity>
             </View>
             
@@ -2630,10 +2675,12 @@ const PreviewVideoShoot = () => {
               }
             ]}
             showsVerticalScrollIndicator={false}
+            bounces={Platform.OS === 'ios'}
+            alwaysBounceVertical={false}
           >
             {/* Video Preview */}
             <View style={styles.videoContainer}>
-              {videoUri && player ? (
+              {videoUri && videoUri.trim() !== "" && player ? (
                 <VideoView
                   style={styles.video}
                   player={player}
@@ -2643,14 +2690,16 @@ const PreviewVideoShoot = () => {
                 />
               ) : (
                 <View style={styles.videoPlaceholder}>
-                  {isLoadingVideo ? (
+                  {isLoadingVideo || isWaitingForVideoUri ? (
                     <>
-                      <MaterialIcons name="video-library" size={48} color="#259B9A" />
-                      <Text style={styles.loadingVideoText}>Loading video...</Text>
+                      <MaterialIcons name="video-library" size={Platform.OS === 'ios' ? getResponsiveFontSize(44, { minSize: 40, maxSize: 52 }) : 48} color="#259B9A" />
+                      <Text style={styles.loadingVideoText}>
+                        {isWaitingForVideoUri ? "Loading video..." : "Loading video..."}
+                      </Text>
                     </>
                   ) : (
                     <>
-                      <MaterialIcons name="videocam-off" size={48} color="rgba(255, 255, 255, 0.5)" />
+                      <MaterialIcons name="videocam-off" size={Platform.OS === 'ios' ? getResponsiveFontSize(44, { minSize: 40, maxSize: 52 }) : 48} color="rgba(255, 255, 255, 0.5)" />
                       <Text style={styles.noVideoText}>No video available</Text>
                     </>
                   )}
@@ -2661,10 +2710,11 @@ const PreviewVideoShoot = () => {
               {videoUri && !isLoadingVideo && (
               <View style={[
                 styles.customControlsContainer,
-                // iOS-specific safe area positioning
+                // iOS-specific positioning fix - ensure controls stay within video bounds
                 Platform.OS === 'ios' && {
-                  bottom: insets.bottom || 0,
-                  paddingBottom: getResponsiveSpacing(device.isTablet ? 16 : 12) + (insets.bottom || 0),
+                  bottom: 0, // Always position at bottom of video container
+                  paddingBottom: getResponsiveSpacing(device.isTablet ? 16 : 12),
+                  // Don't add insets.bottom here as it causes overflow
                 }
               ]}>
                 {/* Time Display */}
@@ -2785,7 +2835,7 @@ const PreviewVideoShoot = () => {
               >
                 {!player.playing && (
                   <View style={styles.playPauseOverlay}>
-                    <MaterialIcons name="play-arrow" size={moderateScale(30)} color="#FFFFFF" />
+                    <MaterialIcons name="play-arrow" size={Platform.OS === 'ios' ? getResponsiveFontSize(28, { minSize: 26, maxSize: 32 }) : moderateScale(30)} color="#FFFFFF" />
                   </View>
                 )}
               </TouchableOpacity>
@@ -3168,7 +3218,7 @@ const PreviewVideoShoot = () => {
             <View style={styles.toasterHeader}>
               <Text style={styles.toasterTitle}>AWS Upload Settings</Text>
               <TouchableOpacity onPress={() => setShowUploadToaster(false)}>
-                <MaterialIcons name="close" size={24} color="white" />
+                <MaterialIcons name="close" size={Platform.OS === 'ios' ? getResponsiveFontSize(22, { minSize: 20, maxSize: 26 }) : 24} color="white" />
               </TouchableOpacity>
             </View>
             
@@ -3214,7 +3264,7 @@ const PreviewVideoShoot = () => {
                 style={[styles.uploadButton, { backgroundColor: '#2196F3', marginTop: 12 }]} 
                 onPress={() => router.push('/screens/AWSSettings')}
               >
-                <MaterialIcons name="settings" size={20} color="white" />
+                  <MaterialIcons name="settings" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : 20} color="white" />
                 <Text style={styles.uploadButtonText}>Configure AWS Settings</Text>
               </TouchableOpacity>
               
@@ -3225,7 +3275,7 @@ const PreviewVideoShoot = () => {
                     performAwsUpload();
                   }}
                 >
-                  <MaterialIcons name="cloud-upload" size={20} color="white" />
+                  <MaterialIcons name="cloud-upload" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : 20} color="white" />
                   <Text style={styles.uploadButtonText}>Upload to AWS</Text>
                 </TouchableOpacity>
               )}
@@ -3233,7 +3283,7 @@ const PreviewVideoShoot = () => {
               {uploadStatus === 'uploading' && (
                 <View style={styles.uploadingContainer}>
                   <View style={styles.uploadingHeader}>
-                    <MaterialIcons name="cloud-upload" size={20} color="#259B9A" />
+                    <MaterialIcons name="cloud-upload" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : 20} color="#259B9A" />
                     <Text style={styles.uploadingText}>Uploading... {uploadProgress.toFixed(1)}%</Text>
                   </View>
                   <View style={styles.progressBarContainer}>
@@ -3244,14 +3294,14 @@ const PreviewVideoShoot = () => {
               
               {uploadStatus === 'completed' && (
                 <View style={styles.completedContainer}>
-                  <MaterialIcons name="check-circle" size={20} color="#4CAF50" />
+                  <MaterialIcons name="check-circle" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : 20} color="#4CAF50" />
                   <Text style={styles.completedText}>Upload Completed!</Text>
                 </View>
               )}
               
               {uploadStatus === 'failed' && (
                 <View style={styles.failedContainer}>
-                  <MaterialIcons name="error" size={20} color="#F44336" />
+                  <MaterialIcons name="error" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : 20} color="#F44336" />
                   <Text style={styles.failedText}>Upload Failed</Text>
                 </View>
               )}
@@ -3280,7 +3330,7 @@ const PreviewVideoShoot = () => {
                 {activeEditorTool === 'filters' && 'Video Filters'}
               </Text>
               <TouchableOpacity onPress={closeVideoEditor}>
-                <MaterialIcons name="close" size={24} color="white" />
+                <MaterialIcons name="close" size={Platform.OS === 'ios' ? getResponsiveFontSize(22, { minSize: 20, maxSize: 26 }) : 24} color="white" />
               </TouchableOpacity>
             </View>
             
@@ -3431,7 +3481,7 @@ const PreviewVideoShoot = () => {
                         }}
                         style={styles.cancelSplitTransition}
                       >
-                        <MaterialIcons name="close" size={moderateScale(20)} color="#fff" />
+                        <MaterialIcons name="close" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : moderateScale(20)} color="#fff" />
                       </TouchableOpacity>
                     </View>
                   )}
@@ -3511,12 +3561,20 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(8),
   },
   header: {
-    paddingTop: getResponsiveSpacing(device.isTablet ? 20 : 15),
-    paddingBottom: getResponsiveSpacing(device.isTablet ? 20 : 15),
+    paddingTop: Platform.OS === 'ios' 
+      ? getResponsiveSpacing(device.isTablet ? 18 : 14)
+      : getResponsiveSpacing(device.isTablet ? 20 : 15),
+    paddingBottom: Platform.OS === 'ios'
+      ? getResponsiveSpacing(device.isTablet ? 18 : 14)
+      : getResponsiveSpacing(device.isTablet ? 20 : 15),
     alignItems: "center",
     position: "relative",
-    minHeight: device.isTablet ? getResponsiveScale(70) : getResponsiveScale(60),
-    paddingHorizontal: getResponsivePadding(device.isTablet ? 24 : 16),
+    minHeight: Platform.OS === 'ios'
+      ? (device.isTablet ? getResponsiveScale(68) : getResponsiveScale(58))
+      : (device.isTablet ? getResponsiveScale(70) : getResponsiveScale(60)),
+    paddingHorizontal: Platform.OS === 'ios'
+      ? getResponsivePadding(device.isTablet ? 22 : 14)
+      : getResponsivePadding(device.isTablet ? 24 : 16),
     // iOS safe area padding will be added dynamically
   },
   backButton: {
@@ -3548,13 +3606,17 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   headerIcon: {
-    width: getResponsiveScale(device.isTablet ? 44 : 40),
-    height: getResponsiveScale(device.isTablet ? 44 : 40),
+    width: Platform.OS === 'ios'
+      ? getResponsiveScale(device.isTablet ? 42 : 38)
+      : getResponsiveScale(device.isTablet ? 44 : 40),
+    height: Platform.OS === 'ios'
+      ? getResponsiveScale(device.isTablet ? 42 : 38)
+      : getResponsiveScale(device.isTablet ? 44 : 40),
     borderRadius: getResponsiveBorderRadius(device.isTablet ? 22 : 20),
     backgroundColor: "rgba(37, 155, 154, 0.2)",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
+    borderWidth: Platform.OS === 'ios' ? 1.5 : 1,
     borderColor: "#259B9A",
   },
   scrollView: {
@@ -3566,9 +3628,15 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     alignItems: "center",
-    marginTop: getResponsiveSpacing(device.isTablet ? 30 : 20),
-    marginBottom: getResponsiveSpacing(device.isTablet ? 40 : 30),
-    paddingHorizontal: getResponsivePadding(device.isTablet ? 16 : 10),
+    marginTop: Platform.OS === 'ios'
+      ? getResponsiveSpacing(device.isTablet ? 26 : 18)
+      : getResponsiveSpacing(device.isTablet ? 30 : 20),
+    marginBottom: Platform.OS === 'ios'
+      ? getResponsiveSpacing(device.isTablet ? 34 : 26)
+      : getResponsiveSpacing(device.isTablet ? 40 : 30),
+    paddingHorizontal: Platform.OS === 'ios'
+      ? getResponsivePadding(device.isTablet ? 14 : 8)
+      : getResponsivePadding(device.isTablet ? 16 : 10),
     // iOS-specific spacing added dynamically if needed
   },
   video: {
@@ -3620,14 +3688,25 @@ const styles = StyleSheet.create({
   },
   customControlsContainer: {
     position: 'absolute',
-    bottom: 0, // iOS safe area bottom added dynamically
+    bottom: 0, // Position at bottom of video container
     left: 0,
     right: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    paddingHorizontal: getResponsivePadding(device.isTablet ? 20 : 15),
-    paddingVertical: getResponsiveSpacing(device.isTablet ? 16 : 12),
-    // iOS safe area padding added dynamically in component
+    paddingHorizontal: Platform.OS === 'ios'
+      ? getResponsivePadding(device.isTablet ? 18 : 13)
+      : getResponsivePadding(device.isTablet ? 20 : 15),
+    paddingVertical: Platform.OS === 'ios'
+      ? getResponsiveSpacing(device.isTablet ? 14 : 10)
+      : getResponsiveSpacing(device.isTablet ? 16 : 12),
+    // iOS: Ensure controls stay within video container bounds
+    // Don't add insets.bottom as it causes controls to extend beyond video
     zIndex: 10,
+    borderTopLeftRadius: Platform.OS === 'ios' 
+      ? getResponsiveBorderRadius(device.isTablet ? 12 : 10)
+      : 0,
+    borderTopRightRadius: Platform.OS === 'ios'
+      ? getResponsiveBorderRadius(device.isTablet ? 12 : 10)
+      : 0,
   },
   customTimeText: {
     color: '#FFFFFF',
@@ -3681,10 +3760,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '50%',
     left: '50%',
-    transform: [{ translateX: -25 }, { translateY: -25 }],
-    width: moderateScale(50),
-    height: moderateScale(50),
-    borderRadius: moderateScale(25),
+    transform: Platform.OS === 'ios' 
+      ? [{ translateX: -23 }, { translateY: -23 }]
+      : [{ translateX: -25 }, { translateY: -25 }],
+    width: Platform.OS === 'ios' ? getResponsiveScale(device.isTablet ? 48 : 46) : moderateScale(50),
+    height: Platform.OS === 'ios' ? getResponsiveScale(device.isTablet ? 48 : 46) : moderateScale(50),
+    borderRadius: Platform.OS === 'ios' 
+      ? getResponsiveBorderRadius(device.isTablet ? 24 : 23)
+      : moderateScale(25),
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -3755,18 +3838,18 @@ const styles = StyleSheet.create({
     marginTop: 50,
   },
   YesNoButton: {
-    marginHorizontal: 10,
-    padding: 10,
-    borderRadius: 8,
+    marginHorizontal: Platform.OS === 'ios' ? getResponsiveSpacing(8) : 10,
+    padding: Platform.OS === 'ios' ? getResponsivePadding(8) : 10,
+    borderRadius: Platform.OS === 'ios' ? getResponsiveBorderRadius(8) : 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    width: 80
+    width: Platform.OS === 'ios' ? getResponsiveScale(76) : 80
   },
   buttonText: {
     color: "#fff",
-    fontSize: 18,
-    marginRight: 8,
+    fontSize: Platform.OS === 'ios' ? getResponsiveFontSize(16, { minSize: 14, maxSize: 18 }) : 18,
+    marginRight: Platform.OS === 'ios' ? getResponsiveSpacing(6) : 8,
   },
   centered: {
     flex: 1,
@@ -3805,20 +3888,22 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: "#fff",
-    padding: 20,
-    borderRadius: 10,
+    padding: Platform.OS === 'ios' ? getResponsivePadding(18) : 20,
+    borderRadius: Platform.OS === 'ios' ? getResponsiveBorderRadius(10) : 10,
     alignItems: "center",
-    width: moderateScale(300),
+    width: Platform.OS === 'ios' 
+      ? getResponsiveScale(device.isTablet ? 320 : 290)
+      : moderateScale(300),
   },
   modalText: {
-    fontSize: 16,
-    marginBottom: 20,
+    fontSize: Platform.OS === 'ios' ? getResponsiveFontSize(15, { minSize: 14, maxSize: 17 }) : 16,
+    marginBottom: Platform.OS === 'ios' ? getResponsiveSpacing(18) : 20,
     textAlign: "center",
   },
   modalUrl: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'ios' ? getResponsiveFontSize(13, { minSize: 12, maxSize: 15 }) : 14,
     color: "#0000EE",
-    marginBottom: 20,
+    marginBottom: Platform.OS === 'ios' ? getResponsiveSpacing(18) : 20,
     textAlign: "center",
   },
   modalButtonContainer: {
