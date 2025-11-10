@@ -85,7 +85,7 @@ The backend listens on `PORT` (defaults to `3000`) and exposes:
 | `PORT` | No | Defaults to `3000`. Change if the port is in use. |
 | `AWS_REGION` | Yes | Region of your bucket, e.g. `us-east-1`. |
 | `AWS_S3_BUCKET` | Yes | Name of the target bucket. |
-| `AWS_S3_PREFIX` | No | Key prefix, defaults to `videos/`. |
+| `AWS_S3_PREFIX` | No | Key prefix, defaults to `user-uploads/`. |
 | `AWS_ACCESS_KEY_ID` | Conditionally | Required unless the server runs with IAM permissions. |
 | `AWS_SECRET_ACCESS_KEY` | Conditionally | Required unless the server runs with IAM permissions. |
 | `PRESIGNED_URL_EXPIRY` | No | Seconds until URL expires (default `900`, i.e. 15 minutes). |
@@ -95,8 +95,8 @@ The backend listens on `PORT` (defaults to `3000`) and exposes:
 ```
 PORT=3000
 AWS_REGION=us-east-1
-AWS_S3_BUCKET=my-teleprompter-uploads
-AWS_S3_PREFIX=videos/
+AWS_S3_BUCKET=startuppal-video-storage
+AWS_S3_PREFIX=user-uploads/
 AWS_ACCESS_KEY_ID=AKIA...
 AWS_SECRET_ACCESS_KEY=your-secret
 PRESIGNED_URL_EXPIRY=900
@@ -129,6 +129,8 @@ http://localhost:3000/health
 
 You should see the configuration summary including bucket, region, and expiry.
 
+- Confirm `bucket` is `startuppal-video-storage` and `prefix` is `user-uploads/` (or your chosen values).
+
 ---
 
 ## Frontend Setup (Expo App)
@@ -141,6 +143,8 @@ The mobile app expects the backend base URL when it requests presigned URLs.
 - Inside the app, open the Settings screen → AWS Configuration and set:
   - Backend URL (e.g. `http://192.168.0.25:3000`)
   - Bucket, region, access key, secret key (if you want device-side uploads)
+
+- For backend-generated uploads, keep "Use Backend Server" ON. To upload without the backend, turn this OFF and provide valid AWS credentials; the app will generate presigned URLs on-device.
 
 ### Run the Expo Dev Server
 
@@ -200,6 +204,15 @@ npx eas build --platform ios
 
 ---
 
+## Upload Behavior
+
+- Default uploads request a presigned PUT URL from the backend.
+- The backend must be reachable from the device; use `http://<your-PC-IP>:3000`, not `localhost`.
+- Without the backend, uploads only work if "Use Backend Server" is OFF and valid `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, and `AWS_REGION` are saved in the app’s AWS Settings. In that case, the app generates presigned URLs on-device.
+- Recommended for production: use the backend for presigned URLs to avoid exposing long-lived credentials on devices.
+
+---
+
 ## Troubleshooting
 
 - **`EADDRINUSE: address already in use :::3000`**  
@@ -213,6 +226,9 @@ npx eas build --platform ios
 
 - **Large uploads fail**  
   Increase `PRESIGNED_URL_EXPIRY` to allow more time, and verify your network connection.
+
+- **Uploads going to the wrong bucket (e.g., `softcodec/videos`)**  
+  Verify which backend the app is calling. Check `GET /health` shows the expected `bucket` and `prefix`. Stop any legacy server using old config and ensure the app’s AWS Settings point to the correct backend URL.
 
 ---
 

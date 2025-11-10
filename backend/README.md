@@ -5,7 +5,7 @@ Lightweight Express server that generates AWS S3 presigned URLs for the teleprom
 ## Prerequisites
 
 - Node.js 16+
-- An AWS S3 bucket (e.g. `softcodec`)
+- An AWS S3 bucket (e.g. `startuppal-video-storage`)
 - IAM credentials with `s3:PutObject` permission on the target bucket/prefix
 
 ## Setup
@@ -20,8 +20,8 @@ Lightweight Express server that generates AWS S3 presigned URLs for the teleprom
    ```ini
    PORT=3000
    AWS_REGION=us-east-1
-   AWS_S3_BUCKET=softcodec
-   AWS_S3_PREFIX=videos/
+   AWS_S3_BUCKET=startuppal-video-storage
+   AWS_S3_PREFIX=user-uploads/
    AWS_ACCESS_KEY_ID=...
    AWS_SECRET_ACCESS_KEY=...
    ```
@@ -44,9 +44,9 @@ Example response:
 ```json
 {
   "success": true,
-  "presignedUrl": "https://softcodec.s3.amazonaws.com/videos/1730981234-video.mp4?...",
-  "key": "videos/1730981234-video.mp4",
-  "bucket": "softcodec",
+  "presignedUrl": "https://startuppal-video-storage.s3.amazonaws.com/user-uploads/1730981234-video.mp4?...",
+  "key": "user-uploads/1730981234-video.mp4",
+  "bucket": "startuppal-video-storage",
   "region": "us-east-1",
   "expiresIn": 900
 }
