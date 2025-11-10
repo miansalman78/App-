@@ -50,6 +50,8 @@ import AWSS3Service from "../../utils/awsS3Service";
 // Enhanced FFmpeg Service
 import FFmpegService from "../../utils/ffmpegService";
 
+const BACKGROUND_AUDIO_TRACK_ID = 'background-audio-track';
+
 // Get screen dimensions - use 'window' for current visible area
 const getScreenDimensions = () => {
   const { width, height } = Dimensions.get('window');
@@ -122,6 +124,7 @@ const PreviewVideoShoot = () => {
   const [flaggedForUpload, setFlaggedForUpload] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'pending' | 'uploading' | 'completed' | 'failed'>('pending');
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [lastUploadedUrl, setLastUploadedUrl] = useState<string | null>(null);
   const [currentVideoData, setCurrentVideoData] = useState<any>(null);
   const [showUploadToaster, setShowUploadToaster] = useState(false);
   const [config, setConfig] = useState<AppConfig>(AppConfigManager.getConfig());
@@ -161,6 +164,7 @@ const PreviewVideoShoot = () => {
     startTime: number;
     endTime: number;
     volume: number;
+    isBackground?: boolean;
   }>>([]);
   
   // Audio Player for background music
@@ -268,6 +272,28 @@ const PreviewVideoShoot = () => {
     
     const activeSegments = videoSegments.filter(seg => !seg.isDeleted);
     return activeSegments.reduce((total, seg) => total + (seg.endTime - seg.startTime), 0);
+  };
+
+  const getBackgroundAudioTargetDuration = () => {
+    const modeParam = (route.params as any)?.mode;
+    if (modeParam === '3min') {
+      return 180;
+    }
+    if (modeParam === '1min') {
+      return 60;
+    }
+
+    const effectiveDuration = getEffectiveDuration();
+    if (effectiveDuration > 0) {
+      return effectiveDuration;
+    }
+
+    const fullDuration = getFullDuration();
+    if (fullDuration > 0) {
+      return fullDuration;
+    }
+
+    return 0;
   };
 
   // Get active segments with virtual timeline mapping (0-based)
@@ -1153,34 +1179,6 @@ const PreviewVideoShoot = () => {
       return;
     }
     
-    // Check if user has configured AWS credentials
-    try {
-      const storedCreds = await AsyncStorage.getItem('user_aws_credentials');
-      if (!storedCreds) {
-        Alert.alert(
-          'AWS Configuration Required',
-          'Please configure your AWS credentials first to upload videos.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Configure Now', 
-              onPress: () => router.push('/screens/AWSSettings')
-            }
-          ]
-        );
-        return;
-      }
-      
-      const userCreds = JSON.parse(storedCreds);
-      console.log('User AWS config loaded:', { 
-        useBackend: userCreds.useBackend,
-        hasBackendUrl: !!userCreds.backendUrl,
-        hasBucket: !!userCreds.bucketName 
-      });
-    } catch (error) {
-      console.error('Error checking AWS credentials:', error);
-    }
-    
     // Generate unique key for the video
     const videoId = Date.now().toString();
     const fileName = `video-${videoId}.mp4`;
@@ -1189,6 +1187,7 @@ const PreviewVideoShoot = () => {
       console.log('Starting AWS upload process...');
       setUploadStatus('uploading');
       setUploadProgress(0);
+      setLastUploadedUrl(null);
       const mode = (route.params as any)?.mode || '1min';
       
       console.log('Generated upload key:', videoId);
@@ -1196,86 +1195,31 @@ const PreviewVideoShoot = () => {
       // Update video status to uploading
       await AWSS3Service.updateVideoUploadStatus(videoId, 'uploading');
       
-      // Get user credentials to determine upload method
-      const storedCreds = await AsyncStorage.getItem('user_aws_credentials');
-      const userCreds = storedCreds ? JSON.parse(storedCreds) : null;
-      
-      // Get fresh presigned URL - either from backend or generate directly
-      console.log('Getting presigned URL...');
+      // Always request a pre-signed URL from backend (Stage 3 requirement)
+      console.log('Getting presigned URL from backend...');
       let presignedUrl: string;
       
-      if (userCreds && userCreds.useBackend) {
-        // Option 1: Get presigned URL from backend
-        try {
-          console.log('Using backend method...');
-          presignedUrl = await AWSS3Service.getPresignedUrlFromBackend(fileName, 'video/mp4');
-          console.log('✅ Got presigned URL from backend');
-        } catch (backendError) {
-          console.error('❌ Backend failed:', backendError);
-          
-          Alert.alert(
-            'Backend Connection Failed',
-            'Could not connect to your backend server.\n\n' +
-            'Please check:\n' +
-            '1. Backend server is running\n' +
-            '2. URL is correct in settings\n' +
-            '3. Phone is on same WiFi network',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { 
-                text: 'Check Settings', 
-                onPress: () => router.push('/screens/AWSSettings')
-              }
-            ]
-          );
-          
-          setUploadStatus('failed');
-          await AWSS3Service.updateVideoUploadStatus(videoId, 'failed', undefined, undefined, 
-            'Backend connection failed');
-          return;
-        }
-      } else if (userCreds) {
-        // Option 2: Generate presigned URL directly with user's credentials
-        try {
-          console.log('Using direct credentials method...');
-          presignedUrl = await AWSS3Service.generatePresignedUrlWithCredentials(
-            fileName,
-            userCreds.accessKeyId,
-            userCreds.secretAccessKey,
-            userCreds.region,
-            userCreds.bucketName,
-            'video/mp4'
-          );
-          console.log('✅ Generated presigned URL with direct credentials');
-        } catch (credError) {
-          console.error('❌ Failed to generate presigned URL:', credError);
-          
-          Alert.alert(
-            'AWS Credentials Error',
-            'Could not generate upload URL with your AWS credentials.\n\n' +
-            'Please verify:\n' +
-            '1. Access Key ID is correct\n' +
-            '2. Secret Access Key is correct\n' +
-            '3. Bucket name exists\n' +
-            '4. Region is correct\n' +
-            '5. IAM permissions allow S3 PutObject',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { 
-                text: 'Fix Settings', 
-                onPress: () => router.push('/screens/AWSSettings')
-              }
-            ]
-          );
-          
-          setUploadStatus('failed');
-          await AWSS3Service.updateVideoUploadStatus(videoId, 'failed', undefined, undefined, 
-            'Credential validation failed');
-          return;
-        }
-      } else {
-        Alert.alert('Error', 'AWS credentials not found');
+      try {
+        presignedUrl = await AWSS3Service.getPresignedUrlFromBackend(fileName, 'video/mp4');
+        console.log('✅ Got presigned URL from backend');
+      } catch (backendError) {
+        console.error('❌ Failed to fetch presigned URL from backend:', backendError);
+        const errorMessage = backendError instanceof Error ? backendError.message : 'Unknown backend error';
+
+        Alert.alert(
+          'Upload Unavailable',
+          'Could not get an upload URL from the backend service. Please verify the backend is running and reachable.',
+          [{ text: 'OK' }]
+        );
+
         setUploadStatus('failed');
+        await AWSS3Service.updateVideoUploadStatus(
+          videoId,
+          'failed',
+          undefined,
+          undefined,
+          errorMessage || 'Failed to get presigned URL'
+        );
         return;
       }
       
@@ -1319,6 +1263,7 @@ const PreviewVideoShoot = () => {
         
         setUploadStatus('completed');
         setUploadProgress(100);
+        setLastUploadedUrl(uploadResult.url || presignedUrl.split('?')[0]);
         
         // **IMPORTANT: Update video in AsyncStorage with uploaded status**
         try {
@@ -1366,6 +1311,7 @@ const PreviewVideoShoot = () => {
         
         setUploadStatus('failed');
         setUploadProgress(0);
+        setLastUploadedUrl(null);
         
         Alert.alert(
           'Upload Failed',
@@ -1389,6 +1335,7 @@ const PreviewVideoShoot = () => {
       
       setUploadStatus('failed');
       setUploadProgress(0);
+      setLastUploadedUrl(null);
       
       Alert.alert(
         'Upload Failed',
@@ -1561,28 +1508,38 @@ const PreviewVideoShoot = () => {
                 setSelectedAudioTrack(selectedTrack);
                 
                 // Add to timeline array instead of mixing immediately
-                const videoDur = getFullDuration();
-                const startTime = currentTime;
-                
+                let alignedDuration = getBackgroundAudioTargetDuration();
+                if (!alignedDuration || alignedDuration <= 0) {
+                  alignedDuration = getFullDuration();
+                }
+                if (!alignedDuration || alignedDuration <= 0) {
+                  alignedDuration = 60; // Fail-safe default to 1 minute
+                }
+
                 const newAudioTrack = {
-                  id: Date.now().toString(),
+                  id: BACKGROUND_AUDIO_TRACK_ID,
                   name: selectedTrack.name,
                   uri: selectedTrack.uri || '',
-                  startTime: startTime,
-                  endTime: Math.min(startTime + 3, videoDur), // Default 3 seconds
+                  startTime: 0,
+                  endTime: alignedDuration,
                   volume: audioVolume,
+                  isBackground: true,
                 };
                 
                 setAudioTracks(prev => {
-                  const updated = [...prev, newAudioTrack];
-                  console.log('✅ Audio track added to timeline:', newAudioTrack);
+                  const nonBackgroundTracks = prev.filter(track => !track.isBackground);
+                  const updated = [...nonBackgroundTracks, newAudioTrack];
+                  console.log('✅ Background audio aligned to video duration:', {
+                    duration: alignedDuration,
+                    track: newAudioTrack,
+                  });
                   console.log('📊 Total audio tracks:', updated.length);
                   return updated;
                 });
                 
                 Alert.alert(
                   'Success', 
-                  `Music "${selectedTrack.name}" added to timeline! It will play for 3 seconds.`,
+                  `Music "${selectedTrack.name}" now spans the full video by default. You can adjust it on the timeline if needed.`,
                   [{ text: 'OK' }]
                 );
               } else {
@@ -2515,21 +2472,32 @@ const PreviewVideoShoot = () => {
       setAudioTrack(newAudioTrack);
       
       // Add to timeline tracks for visual display
-      const videoDur = getFullDuration();
-      const startTime = currentTime;
-      
+      const currentVideoDuration = getFullDuration();
+      let alignedDuration = getBackgroundAudioTargetDuration();
+      if (!alignedDuration || alignedDuration <= 0) {
+        alignedDuration = currentVideoDuration;
+      }
+      if (!alignedDuration || alignedDuration <= 0) {
+        alignedDuration = 60; // Fail-safe default
+      }
+
       const timelineAudioTrack = {
-        id: Date.now().toString() + '_timeline',
+        id: BACKGROUND_AUDIO_TRACK_ID,
         name: audioName,
         uri: audioUri,
-        startTime: startTime,
-        endTime: Math.min(startTime + 3, videoDur), // Default 3 seconds
+        startTime: 0,
+        endTime: alignedDuration,
         volume: audioVolume,
+        isBackground: true,
       };
       
       setAudioTracks(prev => {
-        const updated = [...prev, timelineAudioTrack];
-        console.log('✅ Audio track added to timeline from VolumeControl:', timelineAudioTrack);
+        const nonBackgroundTracks = prev.filter(track => !track.isBackground);
+        const updated = [...nonBackgroundTracks, timelineAudioTrack];
+        console.log('✅ Background audio aligned to video duration from VolumeControl:', {
+          duration: alignedDuration,
+          track: timelineAudioTrack,
+        });
         console.log('📊 Total audio tracks:', updated.length);
         return updated;
       });
@@ -2537,7 +2505,6 @@ const PreviewVideoShoot = () => {
       console.log('Loading audio file:', { audioUri, audioName });
       
       // Get video duration
-      const currentVideoDuration = getFullDuration();
       console.log('Video duration:', currentVideoDuration);
       
       // Load the audio file using expo-av
@@ -2576,7 +2543,7 @@ const PreviewVideoShoot = () => {
 
       Alert.alert(
         'Success',
-        `Background music "${audioName}" loaded successfully!\nVideo: ${currentVideoDuration.toFixed(1)}s, Audio: ${currentAudioDuration.toFixed(1)}s`,
+        `Background music "${audioName}" loaded successfully and now spans ${(alignedDuration || currentVideoDuration).toFixed(1)}s by default. Adjust it from the timeline anytime.`,
         [{ text: 'OK' }]
       );
 
@@ -3150,7 +3117,7 @@ const PreviewVideoShoot = () => {
               Your video is successfully saved to:
             </Text>
             <Text style={styles.modalUrl}>
-              https://startuppal-video-storage.s3.amazonaws.com/user-uploads/test-video.mp4
+              {lastUploadedUrl || 'Upload complete. Verify in your AWS S3 bucket.'}
             </Text>
             <TouchableOpacity
               style={[styles.YesNoButton, { backgroundColor: "#4CAF50" }]}
@@ -3260,13 +3227,7 @@ const PreviewVideoShoot = () => {
               </View>
 
               {/* AWS Settings Button */}
-              <TouchableOpacity 
-                style={[styles.uploadButton, { backgroundColor: '#2196F3', marginTop: 12 }]} 
-                onPress={() => router.push('/screens/AWSSettings')}
-              >
-                  <MaterialIcons name="settings" size={Platform.OS === 'ios' ? getResponsiveFontSize(18, { minSize: 16, maxSize: 22 }) : 20} color="white" />
-                <Text style={styles.uploadButtonText}>Configure AWS Settings</Text>
-              </TouchableOpacity>
+              
               
               {flaggedForUpload && uploadStatus === 'pending' && (
                 <TouchableOpacity 
