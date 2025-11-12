@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Teleprompter Upload Backend - AWS Lambda + API Gateway deployment that
+  generates presigned S3 URLs.
+
+  '
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Handler: lambda.handler
+    Timeout: 10
+    MemorySize: 256
+    Architectures:
+    - x86_64
+    Environment:
+      Variables:
+        AWS_S3_BUCKET:
+          Ref: S3BucketName
+        AWS_S3_PREFIX:
+          Ref: S3Prefix
+        PRESIGNED_URL_EXPIRY:
+          Ref: PresignedUrlExpiry
+        ALLOWED_ORIGIN:
+          Ref: CorsAllowedOrigins
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Existing S3 bucket that will store uploaded assets (e.g. startuppal-video-storage).
+  S3Prefix:
+    Type: String
+    Default: user-uploads/
+    Description: Key prefix inside the bucket. Include trailing slash (e.g. user-uploads/).
+  PresignedUrlExpiry:
+    Type: Number
+    Default: 900
+    MinValue: 60
+    Description: Presigned URL expiry in seconds.
+  CorsAllowedOrigins:
+    Type: String
+    Default: '*'
+    Description: Comma-separated list of allowed origins for CORS (use * for any origin).
+  StageName:
+    Type: String
+    Default: $default
+    Description: HTTP API stage name. Use $default for a stage-less base URL.
+Conditions:
+  IsDefaultStage:
+    Fn::Equals:
+    - Ref: StageName
+    - $default
+Resources:
+  UploadHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName:
+        Ref: StageName
+      CorsConfiguration:
+        AllowOrigins:
+          Fn::Split:
+          - ','
+          - Ref: CorsAllowedOrigins
+        AllowHeaders:
+        - Content-Type
+        - Authorization
+        - X-Amz-Date
+        - X-Amz-Security-Token
+        - X-Api-Key
+        AllowMethods:
+        - GET
+        - POST
+        - OPTIONS
+        MaxAge: 86400
+    Metadata:
+      SamResourceId: UploadHttpApi
+  PresignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://startuppal-video-storage/user-uploads/sam-artifacts/62653d3cdc5e5ba5086a6ef4f83531a7
+      Description: Generates S3 presigned upload URLs for the Teleprompter module.
+      Policies:
+      - Statement:
+        - Sid: AllowPutObjectIntoPrefix
+          Effect: Allow
+          Action:
+          - s3:PutObject
+          Resource:
+            Fn::Sub: arn:${AWS::Partition}:s3:::${S3BucketName}/${S3Prefix}*
+      Events:
+        HealthCheck:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: UploadHttpApi
+            Path: /health
+            Method: GET
+        PresignUrl:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: UploadHttpApi
+            Path: /api/get-presigned-url
+            Method: POST
+    Metadata:
+      SamResourceId: PresignFunction
+Outputs:
+  ApiEndpoint:
+    Description: Base invoke URL for the HTTP API stage.
+    Value:
+      Fn::If:
+      - IsDefaultStage
+      - Fn::GetAtt:
+        - UploadHttpApi
+        - ApiEndpoint
+      - Fn::Sub: ${UploadHttpApi.ApiEndpoint}/${StageName}
+  PresignFunctionArn:
+    Description: ARN of the Lambda function that generates presigned upload URLs.
+    Value:
+      Fn::GetAtt:
+      - PresignFunction
+      - Arn
