@@ -32,6 +32,7 @@ const presignedExpirySeconds = Number.parseInt(
 const credentialsProvided = Boolean(
   process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
 );
+const sessionToken = process.env.AWS_SESSION_TOKEN || null;
 
 const config = {
   region:
@@ -55,6 +56,7 @@ const sharedS3Client = new S3Client({
     ? {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        ...(sessionToken ? { sessionToken } : {}),
       }
     : undefined,
 });
@@ -84,6 +86,7 @@ const getHealthPayload = () => ({
     region: config.region,
     prefix: config.prefix,
     hasCredentials: config.credentialsProvided,
+    hasSessionToken: Boolean(sessionToken),
     presignedExpirySeconds: config.presignedExpirySeconds,
     allowedOrigin: config.allowedOrigin,
   },

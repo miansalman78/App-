@@ -133,16 +133,45 @@ You should see the configuration summary including bucket, region, and expiry.
 
 ---
 
+## Production Backend (AWS API Gateway + Lambda)
+
+- Base URL: `https://jqvznnqt5m.execute-api.eu-west-2.amazonaws.com`
+- Endpoints:
+  - `GET /health` — shows bucket, region, prefix, and credential status
+  - `POST /api/get-presigned-url` — returns presigned S3 PUT URL for uploads
+- S3 config:
+  - `bucket`: `startuppal-video-storage`
+  - `prefix`: `user-uploads/`
+  - `region`: `eu-west-2`
+- App usage:
+  - In AWS Settings, set Backend URL to the base URL above
+  - Keep “Use Backend Server” ON; do not save AWS keys in the app
+  - Uploads send `Content-Type: video/mp4` only; no extra `x-amz-*` headers
+
+### Redeploy (SAM)
+
+- From `backend`:
+  - `sam build`
+  - `sam package --s3-bucket startuppal-video-storage --s3-prefix user-uploads/sam-artifacts --region eu-west-2 --output-template-file packaged.yaml`
+  - `sam deploy --template-file packaged.yaml --stack-name teleprompter-presign-backend-prod --region eu-west-2 --no-confirm-changeset --no-fail-on-empty-changeset --capabilities CAPABILITY_IAM`
+
+### Smoke Test
+
+- `GET https://jqvznnqt5m.execute-api.eu-west-2.amazonaws.com/health`
+  - Look for `hasSessionToken: true` when using temporary AWS creds
+- `POST https://jqvznnqt5m.execute-api.eu-west-2.amazonaws.com/api/get-presigned-url`
+  - Response contains `presignedUrl`, `key`, `bucket`, `region`
+
 ## Frontend Setup (Expo App)
 
 ### Configure backend URL inside the app
 
 The mobile app expects the backend base URL when it requests presigned URLs.
 
-- Default fallback lives in `utils/awsS3Service.ts` (search for `BACKEND_URL`). Update it to your local IP and port if needed.
-- Inside the app, open the Settings screen → AWS Configuration and set:
-  - Backend URL (e.g. `http://192.168.0.25:3000`)
-  - Bucket, region, access key, secret key (if you want device-side uploads)
+- Default fallback lives in `utils/awsS3Service.ts` and points to the live production URL. If you need local development, update it to your LAN IP.
+- Inside the app, open Settings → AWS Configuration and set:
+  - Backend URL: `https://jqvznnqt5m.execute-api.eu-west-2.amazonaws.com`
+  - For backend-generated uploads, you do not need to store AWS keys in the app.
 
 - For backend-generated uploads, keep "Use Backend Server" ON. To upload without the backend, turn this OFF and provide valid AWS credentials; the app will generate presigned URLs on-device.
 
@@ -226,6 +255,12 @@ npx eas build --platform ios
 
 - **Large uploads fail**  
   Increase `PRESIGNED_URL_EXPIRY` to allow more time, and verify your network connection.
+
+- **403 AccessDenied: “headers present which were not signed”**  
+  Ensure the app only sends `Content-Type: video/mp4` on the PUT, not extra `x-amz-*` headers. Update to the latest app build if you see this.
+
+- **403 InvalidAccessKeyId on upload**  
+  When using temporary AWS credentials, the presigned URL must include `X-Amz-Security-Token`. Verify `/health` shows `hasSessionToken: true` and that the presign response includes `X-Amz-Security-Token`.
 
 - **Uploads going to the wrong bucket (e.g., `softcodec/videos`)**  
   Verify which backend the app is calling. Check `GET /health` shows the expected `bucket` and `prefix`. Stop any legacy server using old config and ensure the app’s AWS Settings point to the correct backend URL.
