@@ -132,7 +132,7 @@ class AWSS3Service {
       const fileSize = fileInfo.size || 0;
       console.log('File size:', fileSize, 'bytes', 'with expiration after', expireDays, 'days');
 
-      // Use FileSystem.uploadAsync for React Native compatibility
+      // Build headers compatible with S3 presigned PUT
       console.log('Using FileSystem.uploadAsync for upload...');
       
       return new Promise(async (resolve, reject) => {
@@ -165,7 +165,12 @@ class AWSS3Service {
               expiresAt: expirationDate.toISOString(),
             });
           } else {
-            reject(new Error(`Upload failed with status ${uploadResult.status}`));
+            console.error('S3 upload failed', {
+              status: uploadResult.status,
+              body: uploadResult.body,
+              headers: uploadResult.headers,
+            });
+            reject(new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body || 'Unknown error'}`));
           }
         } catch (error) {
           reject(error);
@@ -331,7 +336,6 @@ class AWSS3Service {
       const fileSize = fileInfo.size || 0;
       console.log('File size:', fileSize, 'bytes');
 
-      // Use FileSystem.uploadAsync for React Native compatibility
       console.log('Using FileSystem.uploadAsync with Fetch method...');
       
       const uploadResult = await FileSystem.uploadAsync(presignedUrl, videoUri, {
@@ -343,7 +347,12 @@ class AWSS3Service {
       });
 
       if (uploadResult.status < 200 || uploadResult.status >= 300) {
-        throw new Error(`Upload failed with status ${uploadResult.status}`);
+        console.error('S3 upload failed', {
+          status: uploadResult.status,
+          body: uploadResult.body,
+          headers: uploadResult.headers,
+        });
+        throw new Error(`Upload failed with status ${uploadResult.status}: ${uploadResult.body || 'Unknown error'}`);
       }
 
       console.log('Upload completed successfully');
@@ -384,47 +393,45 @@ class AWSS3Service {
     contentType: string = 'video/mp4'
   ): Promise<string> {
     try {
-      // Get backend URL from storage or use default
       const config = await this.loadConfig();
-      const BACKEND_URL = config?.backendUrl || 'http://localhost:4000';
-      
-      const backendUrl = `${BACKEND_URL}/api/get-presigned-url`;
-      
-      console.log('Fetching presigned URL from backend:', backendUrl);
-      console.log('Request:', { fileName, contentType });
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      const response = await fetch(backendUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fileName,
-          contentType,
-        }),
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
+      const configuredUrl = config?.backendUrl?.trim();
+      const defaultUrl = 'https://jqvznnqt5m.execute-api.eu-west-2.amazonaws.com';
+      const isLocal = configuredUrl?.startsWith('http://localhost') || configuredUrl?.startsWith('http://127.0.0.1');
+      const primaryBase = !configuredUrl || isLocal ? defaultUrl : configuredUrl;
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-      }
+      const attempt = async (base: string) => {
+        const url = `${base}/api/get-presigned-url`;
+        console.log('Fetching presigned URL from backend:', url);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName, contentType }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: response.statusText }));
+          throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+        }
+        const data = await response.json();
+        if (!data.success || !data.presignedUrl) {
+          throw new Error('Invalid response from backend: missing presignedUrl');
+        }
+        return data.presignedUrl;
+      };
 
-      const data = await response.json();
-      console.log('✅ Presigned URL received from backend');
-      console.log('   Key:', data.key);
-      console.log('   Expires in:', data.expiresIn, 'seconds');
-      
-      if (!data.success || !data.presignedUrl) {
-        throw new Error('Invalid response from backend: missing presignedUrl');
+      try {
+        return await attempt(primaryBase);
+      } catch (err) {
+        const shouldFallback = primaryBase !== defaultUrl;
+        if (shouldFallback) {
+          console.warn('Backend primary URL failed, falling back to default');
+          return await attempt(defaultUrl);
+        }
+        throw err;
       }
-      
-      return data.presignedUrl;
     } catch (error) {
       console.error('❌ Failed to get presigned URL from backend:', error);
       
